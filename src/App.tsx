@@ -14,7 +14,7 @@ import {
 
 import { STANDARD_GOVERNMENT_WARNING } from './database';
 import { verifyLabelText } from './utils/verification';
-import { preprocessCanvasForOcr } from './utils/imageProcessing';
+// preprocessCanvasForOcr kept in utils for potential future use with static images
 import { playPassTone, playFailTone, triggerHapticFeedback } from './utils/audio';
 import type { ColaApplication, VerificationResult } from './types';
 
@@ -162,79 +162,65 @@ export default function App() {
         if (videoRef.current && videoRef.current.readyState === 4) {
           setIsLiveScanningFrame(true);
           try {
-            const fullCanvas = document.createElement('canvas');
-            const vWidth = videoRef.current.videoWidth || 1280;
-            const vHeight = videoRef.current.videoHeight || 720;
-            fullCanvas.width = vWidth;
-            fullCanvas.height = vHeight;
-            const fullCtx = fullCanvas.getContext('2d');
+            // Capture at full native camera resolution
+            const vWidth = videoRef.current.videoWidth || 1920;
+            const vHeight = videoRef.current.videoHeight || 1080;
+            const canvas = document.createElement('canvas');
+            canvas.width = vWidth;
+            canvas.height = vHeight;
+            const ctx = canvas.getContext('2d');
 
-            if (fullCtx) {
-              fullCtx.drawImage(videoRef.current, 0, 0, vWidth, vHeight);
+            if (ctx) {
+              ctx.drawImage(videoRef.current, 0, 0, vWidth, vHeight);
 
-              // Crop to center region where the label is likely positioned
-              const cropX = Math.round(vWidth * 0.05);
-              const cropY = Math.round(vHeight * 0.05);
-              const cropW = Math.round(vWidth * 0.90);
-              const cropH = Math.round(vHeight * 0.90);
+              // Pass RAW unprocessed frame to Tesseract as lossless PNG
+              // Tesseract.js has its own internal Otsu binarization that handles
+              // real-world scenes (curved bottles, glare, shadows) better than
+              // any custom preprocessing we can apply
+              const dataUrl = canvas.toDataURL('image/png');
+              
+              const { data: { text } } = await Tesseract.recognize(dataUrl, 'eng');
+              console.log("Live OCR raw text:", text);
 
-              const roiCanvas = document.createElement('canvas');
-              roiCanvas.width = cropW;
-              roiCanvas.height = cropH;
-              const roiCtx = roiCanvas.getContext('2d');
+              if (text && text.trim().length > 5) {
+                // Accumulate rolling history of last 3 frames
+                ocrFrameHistoryRef.current.push(text);
+                if (ocrFrameHistoryRef.current.length > 3) {
+                  ocrFrameHistoryRef.current.shift();
+                }
+                const combinedOcrText = ocrFrameHistoryRef.current.join('\n');
 
-              if (roiCtx) {
-                roiCtx.drawImage(fullCanvas, cropX, cropY, cropW, cropH, 0, 0, cropW, cropH);
-                
-                // Apply adaptive binarization for maximum OCR accuracy
-                const processedCanvas = preprocessCanvasForOcr(roiCanvas);
-                // Use PNG (lossless) — JPEG compression destroys character edges
-                const dataUrl = processedCanvas.toDataURL('image/png');
-                
-                const { data: { text } } = await Tesseract.recognize(dataUrl, 'eng');
-                console.log("Live OCR raw text:", text);
+                const appConfig: ColaApplication = {
+                  id: 'custom-app',
+                  applicationNumber: 'COLA-CUSTOM-INPUT',
+                  brandName: formBrandName,
+                  classType: formClassType,
+                  abv: formAbv,
+                  volume: formVolume,
+                  producer: formProducer,
+                  countryOfOrigin: formCountryOfOrigin,
+                  warningStatement: STANDARD_GOVERNMENT_WARNING,
+                  status: 'PENDING',
+                  applicantName: 'Manual Review Applicant',
+                  submitDate: new Date().toISOString().split('T')[0]
+                };
 
-                if (text && text.trim().length > 5) {
-                  // Accumulate rolling history of last 3 frames
-                  ocrFrameHistoryRef.current.push(text);
-                  if (ocrFrameHistoryRef.current.length > 3) {
-                    ocrFrameHistoryRef.current.shift();
+                const startTime = Date.now();
+                const report = verifyLabelText(appConfig, combinedOcrText, startTime);
+                setLiveScanResult(report);
+                setVerificationResult(report);
+                setLabelImage(canvas.toDataURL('image/jpeg', 0.85));
+
+                // Sound cue & batch entry on state transition
+                const currentStatus = report.overallPassed ? 'PASS' : 'FAIL';
+                if (lastAudioStatusRef.current !== currentStatus) {
+                  lastAudioStatusRef.current = currentStatus;
+                  accumulateVerificationReport(report);
+                  if (soundEnabled) {
+                    if (report.overallPassed) playPassTone();
+                    else playFailTone();
                   }
-                  const combinedOcrText = ocrFrameHistoryRef.current.join('\n');
-
-                  const appConfig: ColaApplication = {
-                    id: 'custom-app',
-                    applicationNumber: 'COLA-CUSTOM-INPUT',
-                    brandName: formBrandName,
-                    classType: formClassType,
-                    abv: formAbv,
-                    volume: formVolume,
-                    producer: formProducer,
-                    countryOfOrigin: formCountryOfOrigin,
-                    warningStatement: STANDARD_GOVERNMENT_WARNING,
-                    status: 'PENDING',
-                    applicantName: 'Manual Review Applicant',
-                    submitDate: new Date().toISOString().split('T')[0]
-                  };
-
-                  const startTime = Date.now();
-                  const report = verifyLabelText(appConfig, combinedOcrText, startTime);
-                  setLiveScanResult(report);
-                  setVerificationResult(report);
-                  // Store the original (non-binarized) frame for display
-                  setLabelImage(roiCanvas.toDataURL('image/jpeg', 0.85));
-
-                  // Sound cue & batch entry on state transition
-                  const currentStatus = report.overallPassed ? 'PASS' : 'FAIL';
-                  if (lastAudioStatusRef.current !== currentStatus) {
-                    lastAudioStatusRef.current = currentStatus;
-                    accumulateVerificationReport(report);
-                    if (soundEnabled) {
-                      if (report.overallPassed) playPassTone();
-                      else playFailTone();
-                    }
-                    triggerHapticFeedback(report.overallPassed);
-                  }
+                  triggerHapticFeedback(report.overallPassed);
                 }
               }
             }
@@ -244,7 +230,7 @@ export default function App() {
             setIsLiveScanningFrame(false);
           }
         }
-      }, 2000); // 2-second interval — gives Tesseract time to fully process each frame
+      }, 3000); // 3-second interval — Tesseract needs time to process full-res frames
     } else {
       if (liveScanIntervalRef.current) {
         clearInterval(liveScanIntervalRef.current);
@@ -627,7 +613,8 @@ export default function App() {
             const canvas = document.createElement('canvas');
             let width = img.width;
             let height = img.height;
-            const maxDim = 1600;
+            // Cap at 2000px max dimension to prevent browser memory issues
+            const maxDim = 2000;
             if (width > maxDim || height > maxDim) {
               if (width > height) {
                 height = Math.round((height * maxDim) / width);
@@ -642,9 +629,8 @@ export default function App() {
             const ctx = canvas.getContext('2d');
             if (ctx) {
               ctx.drawImage(img, 0, 0, width, height);
-              const processed = preprocessCanvasForOcr(canvas);
-              // Use PNG (lossless) for OCR — JPEG compression destroys character edges
-              resolve(processed.toDataURL('image/png'));
+              // Pass raw image as lossless PNG — let Tesseract handle its own binarization
+              resolve(canvas.toDataURL('image/png'));
             } else {
               resolve(imageSrc);
             }
@@ -709,7 +695,11 @@ export default function App() {
     setCameraActive(true);
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } }
+        video: {
+          facingMode: { ideal: 'environment' },
+          width: { ideal: 1920 },
+          height: { ideal: 1080 }
+        }
       });
       setTimeout(() => {
         if (videoRef.current) {
