@@ -9,7 +9,17 @@ function normalize(str: string): string {
     .trim();
 }
 
-// Helper to calculate similarity score (removed unused function)
+/**
+ * Normalizes numerical field strings from OCR to correct common character swaps.
+ * E.g., replaces letter 'O' with '0', 'l'/'I' with '1', 'S' with '5' in numerical contexts.
+ */
+export function normalizeOcrNumbers(str: string): string {
+  return str
+    .replace(/(\d)\s*[oO](?=\d|\s|%)/g, '$10')
+    .replace(/(?<=\s|^)[oO](?=\.\d)/g, '0')
+    .replace(/(?<=\d)l(?=\d|\%|\s)/gi, '1')
+    .replace(/(?<=\d)I(?=\d|\%|\s)/gi, '1');
+}
 
 // Helper to check if a string contains another (fuzzy substring)
 function fuzzyContains(haystack: string, needle: string): boolean {
@@ -39,7 +49,7 @@ function getBrandRegex(brand: string): RegExp {
 }
 
 export function verifyLabelText(app: ColaApplication, ocrText: string, startTime: number): VerificationResult {
-  const normOcrLower = ocrText.toLowerCase();
+  const normOcrLower = normalizeOcrNumbers(ocrText.toLowerCase());
   
   // 1. BRAND NAME VERIFICATION
   let brandStatus: FieldVerification['status'] = 'MISMATCH';

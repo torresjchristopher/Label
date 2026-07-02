@@ -10,11 +10,15 @@ import {
   Accessibility, 
   RefreshCw,
   FileCheck,
-  HelpCircle
+  HelpCircle,
+  Volume2,
+  VolumeX
 } from 'lucide-react';
 
 import { STANDARD_GOVERNMENT_WARNING } from './database';
 import { verifyLabelText } from './utils/verification';
+import { preprocessCanvasForOcr } from './utils/imageProcessing';
+import { playPassTone, playFailTone, triggerHapticFeedback } from './utils/audio';
 import type { ColaApplication, VerificationResult } from './types';
 
 // Preset OCR texts to guarantee high accuracy for demo assets
@@ -118,6 +122,8 @@ export default function App() {
     }
   }, [largeTextMode]);
 
+  const [soundEnabled, setSoundEnabled] = useState(true);
+
   // Live viewfinder frame scan states
   const [liveScanResult, setLiveScanResult] = useState<VerificationResult | null>(null);
   const [isLiveScanningFrame, setIsLiveScanningFrame] = useState(false);
@@ -137,7 +143,8 @@ export default function App() {
             const ctx = canvas.getContext('2d');
             if (ctx) {
               ctx.drawImage(videoRef.current, 0, 0, canvas.width, canvas.height);
-              const dataUrl = canvas.toDataURL('image/jpeg');
+              const processedCanvas = preprocessCanvasForOcr(canvas);
+              const dataUrl = processedCanvas.toDataURL('image/jpeg');
               
               const { data: { text } } = await Tesseract.recognize(dataUrl, 'eng');
               
@@ -560,12 +567,24 @@ export default function App() {
       setVerificationResult(report);
       accumulateVerificationReport(report);
 
+      if (soundEnabled) {
+        if (report.overallPassed) playPassTone();
+        else playFailTone();
+      }
+      triggerHapticFeedback(report.overallPassed);
+
     } catch (error) {
       console.error("OCR Scan Error:", error);
       setScanProgressText("Scan Error. Reverting to fallback rules.");
       const fallbackReport = verifyLabelText(appConfig, PRESET_OCR_TEXTS['old_tom_bourbon_label.jpg'], startTime);
       setVerificationResult(fallbackReport);
       accumulateVerificationReport(fallbackReport);
+
+      if (soundEnabled) {
+        if (fallbackReport.overallPassed) playPassTone();
+        else playFailTone();
+      }
+      triggerHapticFeedback(fallbackReport.overallPassed);
     } finally {
       setIsScanning(false);
     }
@@ -628,7 +647,8 @@ export default function App() {
       const ctx = canvas.getContext('2d');
       if (ctx) {
         ctx.drawImage(videoRef.current, 0, 0, canvas.width, canvas.height);
-        const dataUrl = canvas.toDataURL('image/jpeg');
+        const processedCanvas = preprocessCanvasForOcr(canvas);
+        const dataUrl = processedCanvas.toDataURL('image/jpeg');
         setLabelImage(dataUrl);
         stopCamera();
         await runComplianceCheckWithImage(dataUrl);
@@ -657,6 +677,16 @@ export default function App() {
         </div>
 
         <div className="header-actions">
+          {/* Sound / Audio Alerts Toggle */}
+          <button 
+            className={`access-control-btn ${soundEnabled ? 'active' : ''}`}
+            onClick={() => setSoundEnabled(!soundEnabled)}
+            title="Toggle Web Audio and Haptic cues for pass/fail scans"
+          >
+            {soundEnabled ? <Volume2 size={18} /> : <VolumeX size={18} />}
+            <span>{soundEnabled ? 'Audio On' : 'Audio Off'}</span>
+          </button>
+
           {/* Accessibility Toggle */}
           <button 
             className={`access-control-btn ${largeTextMode ? 'active' : ''}`}
