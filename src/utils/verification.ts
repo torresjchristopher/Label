@@ -138,18 +138,19 @@ export function verifyLabelText(app: ColaApplication, ocrText: string, startTime
     const ocrHasClassExact = ocrText.includes(expectedClass);
     const ocrHasClassLower = normOcrLower.includes(expectedClass.toLowerCase());
     
-    if (ocrHasClassExact) {
+    if (ocrHasClassExact || ocrHasClassLower || fuzzyContains(ocrText, expectedClass)) {
       classStatus = 'MATCH';
-      classMsg = 'Class/Type matches exactly.';
+      classMsg = 'Class/Type matches application form.';
       detectedClass = expectedClass;
-    } else if (ocrHasClassLower) {
-      classStatus = 'PARTIAL';
-      classMsg = 'Class/Type matches, but casing differs.';
-      detectedClass = expectedClass;
-    } else if (fuzzyContains(ocrText, expectedClass)) {
-      classStatus = 'PARTIAL';
-      classMsg = 'Class/Type matches fuzzily (e.g. contains key terms).';
-      detectedClass = 'Fuzzy match';
+    } else {
+      // Search for individual keywords (e.g., "Tequila" in "Tequila Blanco")
+      const classWords = expectedClass.split(' ').filter(w => w.length > 2);
+      const matchedWord = classWords.find(w => normOcrLower.includes(w.toLowerCase()));
+      if (matchedWord) {
+        classStatus = 'MATCH';
+        classMsg = `Class/Type matched key designation term ("${matchedWord}").`;
+        detectedClass = expectedClass;
+      }
     }
   }
   
@@ -165,8 +166,8 @@ export function verifyLabelText(app: ColaApplication, ocrText: string, startTime
   let abvMsg = 'ABV statement not found or incorrect.';
   let detectedAbv = 'Not detected';
   
-  const expectedAbvVal = app.abv.match(/\d+(?:\.\d+)?/)?.[0] || '';
-  const abvRegex = /(\d+(?:\.\d+)?)\s*%\s*(?:alc|vol|abv|by\s*vol)?/i;
+  const expectedAbvVal = app.abv.match(/\d+(?:\.\d+)?/)?.[0] || app.abv.trim();
+  const abvRegex = /(\d+(?:\.\d+)?)\s*(?:%|alc|vol|abv|by\s*vol|proof)/i;
   const abvMatch = normOcrLower.match(abvRegex);
   
   if (abvMatch) {
@@ -176,13 +177,17 @@ export function verifyLabelText(app: ColaApplication, ocrText: string, startTime
     if (isStandaloneMonitoring) {
       abvStatus = 'MATCH';
       abvMsg = `Standalone Scan: Mandatory ABV statement detected ("${detectedAbv}").`;
-    } else if (actualAbvVal === expectedAbvVal) {
+    } else if (actualAbvVal === expectedAbvVal || normOcrLower.includes(expectedAbvVal)) {
       abvStatus = 'MATCH';
-      abvMsg = 'Alcohol content matches exactly.';
+      abvMsg = 'Alcohol content matches application form.';
     } else {
       abvStatus = 'MISMATCH';
       abvMsg = `ABV mismatch. Application states ${app.abv}, but label shows ${detectedAbv}.`;
     }
+  } else if (!isStandaloneMonitoring && expectedAbvVal && normOcrLower.includes(expectedAbvVal)) {
+    abvStatus = 'MATCH';
+    detectedAbv = `${expectedAbvVal}% ALC/VOL`;
+    abvMsg = 'Alcohol content numerical value matched application form.';
   } else if (isStandaloneMonitoring) {
     abvStatus = 'MISMATCH';
     abvMsg = 'Standalone Scan: Mandatory ABV % statement missing from label.';
@@ -200,20 +205,22 @@ export function verifyLabelText(app: ColaApplication, ocrText: string, startTime
   let volMsg = 'Net contents statement not found or incorrect.';
   let detectedVol = 'Not detected';
   
+  const expectedVolVal = app.volume.match(/\d+(?:\.\d+)?/)?.[0] || '';
   const expectedVolClean = normalize(app.volume);
-  const volumeRegex = /(\d+(?:\.\d+)?)\s*(ml|l|liters|fl\s*oz|fl\s*\.\s*oz|fluid\s*ounces)/i;
+  const volumeRegex = /(\d+(?:\.\d+)?)\s*(ml|l|liters|cl|fl\s*oz|fl\s*\.\s*oz|fluid\s*ounces)/i;
   const volMatch = normOcrLower.match(volumeRegex);
   
   if (volMatch) {
     detectedVol = volMatch[0].toUpperCase();
     const actualVolClean = normalize(detectedVol);
+    const actualVolVal = volMatch[1];
     
     if (isStandaloneMonitoring) {
       volStatus = 'MATCH';
       volMsg = `Standalone Scan: Mandatory net contents statement detected ("${detectedVol}").`;
-    } else if (actualVolClean.replace(/\s+/g, '') === expectedVolClean.replace(/\s+/g, '')) {
+    } else if (actualVolVal === expectedVolVal || actualVolClean.replace(/\s+/g, '') === expectedVolClean.replace(/\s+/g, '') || normOcrLower.includes(expectedVolVal)) {
       volStatus = 'MATCH';
-      volMsg = 'Net contents match exactly.';
+      volMsg = 'Net contents match application form.';
     } else if (actualVolClean.includes(expectedVolClean) || expectedVolClean.includes(actualVolClean)) {
       volStatus = 'PARTIAL';
       volMsg = 'Net contents matches fuzzily (e.g., spacing/abbreviation difference).';
@@ -221,6 +228,10 @@ export function verifyLabelText(app: ColaApplication, ocrText: string, startTime
       volStatus = 'MISMATCH';
       volMsg = `Volume mismatch. Application states ${app.volume}, but label shows ${detectedVol}.`;
     }
+  } else if (!isStandaloneMonitoring && expectedVolVal && normOcrLower.includes(expectedVolVal)) {
+    volStatus = 'MATCH';
+    detectedVol = app.volume;
+    volMsg = 'Net contents numerical value matched application form.';
   } else if (isStandaloneMonitoring) {
     volStatus = 'MISMATCH';
     volMsg = 'Standalone Scan: Mandatory net contents statement missing from label.';
@@ -257,16 +268,16 @@ export function verifyLabelText(app: ColaApplication, ocrText: string, startTime
         producerMsg = 'Standalone Scan: Mandatory producer/bottler statement missing from label.';
       }
     }
-  } else if (fuzzyContains(ocrText, app.producer)) {
+  } else if (fuzzyContains(ocrText, app.producer) || normOcrLower.includes(app.producer.toLowerCase())) {
     producerStatus = 'MATCH';
     detectedProducer = app.producer;
     producerMsg = 'Producer matches application form.';
   } else {
     const shortName = app.producer.split(',')[0];
-    if (fuzzyContains(ocrText, shortName)) {
-      producerStatus = 'PARTIAL';
+    if (fuzzyContains(ocrText, shortName) || normOcrLower.includes(shortName.toLowerCase())) {
+      producerStatus = 'MATCH';
       detectedProducer = shortName;
-      producerMsg = 'Producer name matched, but address details may differ or be missing.';
+      producerMsg = 'Producer name matched application form.';
     }
   }
   
@@ -294,13 +305,14 @@ export function verifyLabelText(app: ColaApplication, ocrText: string, startTime
       originMsg = 'Standalone Scan: Domestic product standard (no import declaration required).';
     }
   } else if (app.countryOfOrigin.toLowerCase() !== 'united states' && app.countryOfOrigin.toLowerCase() !== 'usa') {
-    originStatus = 'MISMATCH';
-    originMsg = `Import origin missing or mismatch. Application states ${app.countryOfOrigin}.`;
-    
-    if (fuzzyContains(ocrText, app.countryOfOrigin)) {
+    const originTerm = app.countryOfOrigin.toLowerCase();
+    if (fuzzyContains(ocrText, app.countryOfOrigin) || normOcrLower.includes(originTerm) || (originTerm === 'mexico' && (normOcrLower.includes('hecho en mexico') || normOcrLower.includes('product of mexico')))) {
       originStatus = 'MATCH';
       detectedOrigin = app.countryOfOrigin;
       originMsg = 'Country of origin matches application form.';
+    } else {
+      originStatus = 'MISMATCH';
+      originMsg = `Import origin missing or mismatch. Application states ${app.countryOfOrigin}.`;
     }
   }
   

@@ -162,8 +162,8 @@ export default function App() {
           setIsLiveScanningFrame(true);
           try {
             const canvas = document.createElement('canvas');
-            canvas.width = 400;
-            canvas.height = 300;
+            canvas.width = videoRef.current.videoWidth || 1280;
+            canvas.height = videoRef.current.videoHeight || 720;
             const ctx = canvas.getContext('2d');
             if (ctx) {
               ctx.drawImage(videoRef.current, 0, 0, canvas.width, canvas.height);
@@ -171,6 +171,7 @@ export default function App() {
               const dataUrl = processedCanvas.toDataURL('image/jpeg');
               
               const { data: { text } } = await Tesseract.recognize(dataUrl, 'eng');
+              console.log("Extracted Live Camera OCR Text:", text);
               
               // Real-time text component recognition
               if (text && text.trim().length > 8) {

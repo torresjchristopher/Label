@@ -11,21 +11,24 @@ export function preprocessCanvasForOcr(canvas: HTMLCanvasElement): HTMLCanvasEle
   const ctx = processedCanvas.getContext('2d');
   if (!ctx) return canvas;
   
-  // Draw original frame
+  // Draw original high-res frame
   ctx.drawImage(canvas, 0, 0);
   
   try {
     const imgData = ctx.getImageData(0, 0, processedCanvas.width, processedCanvas.height);
     const d = imgData.data;
     
-    // Grayscale transformation using BT.601 luminance weights
+    // Contrast boost & grayscale conversion to maximize character edge contrast
+    const contrastFactor = 1.4; // 40% contrast boost
     for (let i = 0; i < d.length; i += 4) {
+      // Grayscale calculation
       const gray = 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
-      // Binarize: threshold at 128
-      const val = gray > 128 ? 255 : 0;
-      d[i] = val;     // Red
-      d[i + 1] = val; // Green
-      d[i + 2] = val; // Blue
+      // Contrast stretch
+      const adjusted = Math.min(255, Math.max(0, (gray - 128) * contrastFactor + 128));
+      
+      d[i] = adjusted;     // Red
+      d[i + 1] = adjusted; // Green
+      d[i + 2] = adjusted; // Blue
     }
     
     ctx.putImageData(imgData, 0, 0);
