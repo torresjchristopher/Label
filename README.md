@@ -200,7 +200,7 @@ To facilitate immediate testing without requiring you to print physical bottles:
 - **CHATEAU BORDEAUX**: Select and scan to catch an **ABV Mismatch** (Form states 13.5%, label states 14.2%).
 
 ### 4. Known Limitations
-- TrOCR (`Xenova/trocr-base-printed`) is optimized for printed, single-line text. Curved bottle labels with heavy stylization may require further preprocessing tuning.
+- TrOCR (`Xenova/trocr-base-printed`) is optimized for printed text and performs best on flat, clearly lit labels. Curved bottle labels with heavy stylization may require further preprocessing tuning (e.g., adjusting the adaptive threshold `C` bias or increasing beam count).
 - The confidence estimator is heuristic-based (no calibrated probability from the model itself). Beam scores could be exposed via `return_dict_in_generate` in future model versions.
 - First load requires model download (~40–80 MB for quantized weights); subsequent loads use browser cache.
 

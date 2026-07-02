@@ -58,13 +58,19 @@ export function normalizeOcrNumberString(raw: string): string {
     .replace(/(?<=[1-9])\s+(?=\d)/g, ''); // remove spaces inside numbers
 }
 
+/**
+ * US fluid ounce to millilitre conversion factor (1 fl oz = 29.5735 mL).
+ * Reference: NIST Handbook 44 Appendix C.
+ */
+const ML_PER_FLUID_OUNCE = 29.5735;
+
 /** Convert a volume amount + unit to millilitres. Returns null if unknown unit. */
 export function toMl(amount: number, unit: string): number | null {
   const u = unit.toLowerCase().replace(/\s+/g, '');
   if (u === 'ml') return amount;
   if (u === 'l' || u === 'liter' || u === 'liters' || u === 'litre' || u === 'litres') return amount * 1000;
   if (u === 'cl') return amount * 10;
-  if (u === 'floz' || u === 'fl.oz' || u === 'fluidounce' || u === 'fluidounces') return amount * 29.5735;
+  if (u === 'floz' || u === 'fl.oz' || u === 'fluidounce' || u === 'fluidounces') return amount * ML_PER_FLUID_OUNCE;
   return null;
 }
 

@@ -59,6 +59,9 @@ export async function initOcrPipeline(
   onProgress?: (pct: number) => void
 ): Promise<ReturnType<typeof pipeline>> {
   return pipeline('image-to-text', 'Xenova/trocr-base-printed', {
+    // quantized: trades ~5-10% accuracy for ~4× smaller model size (~40 MB vs ~175 MB).
+    // For compliance use cases needing maximum accuracy, set to false (requires more bandwidth
+    // and memory, and increases first-load time).
     quantized: true,
     progress_callback: onProgress
       ? (p: number) => onProgress(Math.round(p))

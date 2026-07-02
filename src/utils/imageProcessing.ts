@@ -112,10 +112,20 @@ function applyContrastAndDenoise(
   w: number,
   h: number
 ): Uint8Array {
-  // 1. Histogram stretch
-  const sorted = new Uint8Array(gray).sort();
-  const p5 = sorted[Math.floor(sorted.length * 0.05)];
-  const p95 = sorted[Math.floor(sorted.length * 0.95)];
+  // 1. Histogram-based percentile stretch (avoids sorting the full pixel array)
+  const hist = new Uint32Array(256);
+  for (const v of gray) hist[v]++;
+  const total = w * h;
+  const p5Target = Math.floor(total * 0.05);
+  const p95Target = Math.floor(total * 0.95);
+  let p5 = 0;
+  let p95 = 255;
+  let cumulative = 0;
+  for (let t = 0; t < 256; t++) {
+    cumulative += hist[t];
+    if (cumulative <= p5Target) p5 = t;
+    if (cumulative <= p95Target) p95 = t;
+  }
   const range = p95 - p5 || 1;
 
   const stretched = new Uint8Array(w * h);
@@ -149,18 +159,30 @@ function applyContrastAndDenoise(
 /**
  * Heuristic deskew: rotate the canvas by a small angle if needed.
  *
- * Uses projection profile analysis on the binarized image — the angle that
- * produces the sharpest horizontal projection (maximum variance of row sums)
- * is selected. Search range is ±5° in 1° steps.
+ * Uses projection profile analysis on a downsampled (≤300px wide) grayscale
+ * version of the image for performance — the angle that produces the sharpest
+ * horizontal projection (maximum variance of row sums) is selected.
+ * Search range is ±5° in 1° steps.
  */
 export function deskewCanvas(canvas: HTMLCanvasElement): HTMLCanvasElement {
   const ctx = canvas.getContext('2d');
   if (!ctx) return canvas;
 
-  const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+  // Downsample to ≤300px wide for fast projection analysis
+  const deskewScale = Math.min(1, 300 / canvas.width);
+  const dw = Math.round(canvas.width * deskewScale);
+  const dh = Math.round(canvas.height * deskewScale);
+  const downCanvas = document.createElement('canvas');
+  downCanvas.width = dw;
+  downCanvas.height = dh;
+  const downCtx = downCanvas.getContext('2d');
+  if (!downCtx) return canvas;
+  downCtx.drawImage(canvas, 0, 0, dw, dh);
+
+  const imgData = downCtx.getImageData(0, 0, dw, dh);
   const d = imgData.data;
-  const w = canvas.width;
-  const h = canvas.height;
+  const w = dw;
+  const h = dh;
 
   // Build grayscale for projection
   const gray = new Uint8Array(w * h);

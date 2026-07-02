@@ -195,7 +195,8 @@ export default function App() {
               // Run multi-pass OCR with confidence gating
               const ocrResult = await runOcr(canvas, ocrPipelineRef.current);
               const text = ocrResult.text;
-              console.log(`[Live OCR] pass=${ocrResult.pass} confidence=${ocrResult.confidence.toFixed(2)} text=${text.substring(0, 80)}`);
+              // Truncate log to 60 chars to avoid leaking full label content in production logs
+              console.log(`[Live OCR] pass=${ocrResult.pass} confidence=${ocrResult.confidence.toFixed(2)} text="${text.substring(0, 60)}…"`);
 
               if (text && text.trim().length > 5) {
                 ocrFrameHistoryRef.current.push(text);
@@ -586,7 +587,7 @@ export default function App() {
     }
     setIsScanning(true);
     setScanProgress(0);
-    setScanProgressText('Initializing Transformers.js Computer Vision OCR for TTB Compliance...');
+    setScanProgressText('Initializing AI label scanner...');
     const startTime = Date.now();
     // Construct a mock ColaApplication object from form inputs to match with verification utility
     const appConfig: ColaApplication = {
@@ -677,7 +678,7 @@ export default function App() {
         const ocrResult = await runOcr(sourceCanvas, ocrPipelineRef.current);
         finalOcrText = ocrResult.text;
         ocrConfidence = ocrResult.confidence;
-        console.log(`[OCR] Final: pass=${ocrResult.pass} confidence=${ocrResult.confidence.toFixed(2)} text="${finalOcrText.substring(0, 80)}"`);
+        console.log(`[OCR] Final: pass=${ocrResult.pass} confidence=${ocrResult.confidence.toFixed(2)} text="${finalOcrText.substring(0, 60)}…"`);
 
         setScanProgress(100);
       }
