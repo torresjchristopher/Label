@@ -246,10 +246,13 @@ export default function App() {
   // Batch Processing Pipeline Simulation (Janet's Seattle Request)
   const triggerBatchProcess = () => {
     if (isProcessingBatch) return;
+    if (batchSize === 0) {
+      alert('Please upload a batch of labels first.');
+      return;
+    }
     setIsProcessingBatch(true);
     setBatchProcessed(0);
     setBatchStats({ approved: 0, rejected: 0, flagged: 0 });
-    setBatchSize(240);
     setBatchLog([]);
     setBatchList([]);
     
@@ -263,15 +266,15 @@ export default function App() {
     const listEntries: typeof batchList = [];
 
     const interval = setInterval(() => {
-      if (currentProcessed >= 240) {
+      if (currentProcessed >= batchSize) {
         clearInterval(interval);
         setIsProcessingBatch(false);
         const endTime = Date.now();
         const duration = (endTime - startTime) / 1000;
-        setBatchProcessingSpeed(Math.round((240 / duration) * 10) / 10);
+        setBatchProcessingSpeed(Math.round((batchSize / duration) * 10) / 10);
         
         setBatchLog(prev => [
-          { time: new Date().toLocaleTimeString(), msg: `🎉 Batch completed in ${duration.toFixed(2)} seconds. Average speed: ${(duration * 1000 / 240).toFixed(1)}ms per label.` },
+          { time: new Date().toLocaleTimeString(), msg: `🎉 Batch completed in ${duration.toFixed(2)} seconds. Average speed: ${(duration * 1000 / batchSize).toFixed(1)}ms per label.` },
           { time: new Date().toLocaleTimeString(), msg: `✅ Auto-approved: ${approvedCount} | ⚠️ Flagged for review: ${flaggedCount} | ❌ Rejected: ${rejectedCount}` },
           ...prev
         ]);
@@ -280,7 +283,7 @@ export default function App() {
 
       // Process 6 labels per tick
       for (let i = 0; i < 6; i++) {
-        if (currentProcessed >= 240) break;
+        if (currentProcessed >= batchSize) break;
         currentProcessed++;
         
         // Simulate realistic results based on compliance checking
@@ -310,7 +313,7 @@ export default function App() {
           errors
         });
 
-        if (currentProcessed % 8 === 0 || currentProcessed === 240) {
+        if (currentProcessed % 8 === 0 || currentProcessed === batchSize) {
           let logMsg = `[Label #${102450 + currentProcessed}] Checked brand "${brandName}" - ${result}`;
           if (errors.length > 0) logMsg += ` - Reason: ${errors.join(', ')}`;
           logEntries.unshift({
@@ -395,7 +398,7 @@ export default function App() {
                 <div className="panel-body">
                   <div className="form-vertical-stack">
                     <div className="form-group">
-                      <label className="form-label">Brand Name (Required)</label>
+                      <label className="form-label">Brand Name</label>
                       <input 
                         type="text" 
                         className="db-search-input" 

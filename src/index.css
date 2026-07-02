@@ -139,6 +139,7 @@ header {
   padding: 0;
   border-bottom: 2px solid var(--border-color);
   margin-bottom: 1.5rem;
+  width: fit-content;
 }
 
 .tab-btn {
