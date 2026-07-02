@@ -9,12 +9,11 @@ import {
   Download, 
   Accessibility, 
   RefreshCw,
-  FolderOpen,
   FileCheck,
   HelpCircle
 } from 'lucide-react';
 
-import { MOCK_COLA_APPLICATIONS, POPULAR_PRODUCTS, STANDARD_GOVERNMENT_WARNING } from './database';
+import { STANDARD_GOVERNMENT_WARNING } from './database';
 import { verifyLabelText } from './utils/verification';
 import type { ColaApplication, VerificationResult } from './types';
 
@@ -52,14 +51,12 @@ const PRESET_OCR_TEXTS: Record<string, string> = {
 
 export default function App() {
   // Navigation & UI Configuration
-  const [activeTab, setActiveTab] = useState<'single' | 'existing' | 'batch'>('single');
+  const [activeTab, setActiveTab] = useState<'single' | 'batch'>('single');
   const [largeTextMode, setLargeTextMode] = useState(false);
   
-  // Product Registry - Empty by default, agents populate as needed
-  const [productRegistry, setProductRegistry] = useState<any[]>([]);
+  // Product Registry - Not used since no 'existing' tab
 
   // Keep track of active prefilled product ID
-  const [activeProductId, setActiveProductId] = useState<string | null>(null);
 
   // Single Workspace Form Input States - Start empty for clean slate
   const [formBrandName, setFormBrandName] = useState('');
@@ -102,22 +99,10 @@ export default function App() {
     }
   }, [largeTextMode]);
 
-  // Load Preset Test Cases
-  const handleLoadPreset = (presetId: string) => {
-    const app = MOCK_COLA_APPLICATIONS.find(a => a.id === presetId);
-    if (app) {
-      setFormBrandName(app.brandName);
-      setFormClassType(app.classType);
-      setFormAbv(app.abv);
-      setFormVolume(app.volume);
-      setFormProducer(app.producer);
-      setFormCountryOfOrigin(app.countryOfOrigin);
-      setLabelImage(app.labelUrl || '');
-      setVerificationResult(null);
-      setActiveProductId(presetId);
-      stopCamera();
-    }
-  };
+  // Load Preset Test Cases - Not used anymore since no 'existing' tab
+  // const handleLoadPreset = (presetId: string) => {
+  //   ...
+  // };
 
   // Handle local File upload
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -203,37 +188,11 @@ export default function App() {
       const report = verifyLabelText(appConfig, finalOcrText, startTime);
       setVerificationResult(report);
 
-      // Increment scans count and update status
-      if (activeProductId) {
-        setProductRegistry(prev => prev.map(p => {
-          if (p.id === activeProductId) {
-            return {
-              ...p,
-              scans: p.scans + 1,
-              lastStatus: report.overallPassed ? 'COMPLIANT' : 'NON-COMPLIANT'
-            };
-          }
-          return p;
-        }));
-      }
     } catch (error) {
       console.error("OCR Scan Error:", error);
       setScanProgressText("Scan Error. Reverting to fallback rules.");
       const fallbackReport = verifyLabelText(appConfig, PRESET_OCR_TEXTS['old_tom_bourbon_label.jpg'], startTime);
       setVerificationResult(fallbackReport);
-      
-      if (activeProductId) {
-        setProductRegistry(prev => prev.map(p => {
-          if (p.id === activeProductId) {
-            return {
-              ...p,
-              scans: p.scans + 1,
-              lastStatus: fallbackReport.overallPassed ? 'COMPLIANT' : 'NON-COMPLIANT'
-            };
-          }
-          return p;
-        }));
-      }
     } finally {
       setIsScanning(false);
     }
@@ -324,27 +283,23 @@ export default function App() {
         if (currentProcessed >= 240) break;
         currentProcessed++;
         
-        // Randomly generate results based on realistic statistics
+        // Simulate realistic results based on compliance checking
         const rand = Math.random();
         let result = '';
         let errors: string[] = [];
-        let brandName = '';
-        
-        // Pick random popular product
-        const randProd = POPULAR_PRODUCTS[Math.floor(Math.random() * POPULAR_PRODUCTS.length)];
-        brandName = randProd.brandName;
+        let brandName = `Brand #${102450 + currentProcessed}`;
 
         if (rand < 0.75) {
           result = 'Approved (Auto)';
           approvedCount++;
         } else if (rand < 0.90) {
           result = 'Flagged (Manual Review)';
-          errors.push('Fuzzy brand name match (STONE\'S vs Stones)');
+          errors.push('Fuzzy brand name match');
           if (Math.random() > 0.5) errors.push('Casing discrepancy on Warning header');
           flaggedCount++;
         } else {
           result = 'Rejected';
-          errors.push(Math.random() > 0.5 ? 'ABV mismatch (Form says 12%, label has 13.5%)' : 'Government Warning wording mismatch');
+          errors.push(Math.random() > 0.5 ? 'ABV mismatch' : 'Government Warning wording mismatch');
           rejectedCount++;
         }
 
@@ -411,17 +366,6 @@ export default function App() {
           </button>
           
           <button 
-            className={`tab-btn ${activeTab === 'existing' ? 'active' : ''}`} 
-            onClick={() => {
-              setActiveTab('existing');
-              stopCamera();
-            }}
-          >
-            <FolderOpen size={18} />
-            <span>Existing Products</span>
-          </button>
-
-          <button 
             className={`tab-btn ${activeTab === 'batch' ? 'active' : ''}`} 
             onClick={() => {
               setActiveTab('batch');
@@ -429,7 +373,7 @@ export default function App() {
             }}
           >
             <Play size={18} />
-            <span>Verify Batch Ingest</span>
+            <span>Verify Batch</span>
           </button>
         </div>
       </div>
@@ -583,22 +527,22 @@ export default function App() {
                       </label>
                     </div>
                   )}
+
+                  {/* Verify TTB Compliance Button */}
+                  <div style={{ marginTop: '1.5rem' }}>
+                    <button 
+                      className="btn btn-primary btn-large" 
+                      onClick={handleRunComplianceCheck}
+                      disabled={isScanning || !labelImage}
+                      style={{ width: '100%', fontSize: '1.1rem', boxShadow: '0 0 25px rgba(212,175,55,0.3)' }}
+                    >
+                      <Sparkles size={20} />
+                      <span>Verify TTB Compliance</span>
+                    </button>
+                  </div>
                 </div>
               </div>
 
-            </div>
-
-            {/* Glowing Scan Trigger Button */}
-            <div className="text-center" style={{ margin: '1rem 0' }}>
-              <button 
-                className="btn btn-primary btn-large" 
-                onClick={handleRunComplianceCheck}
-                disabled={isScanning || !labelImage}
-                style={{ minWidth: '320px', fontSize: '1.25rem', boxShadow: '0 0 25px rgba(212,175,55,0.3)' }}
-              >
-                <Sparkles size={24} />
-                <span>Verify TTB Compliance</span>
-              </button>
             </div>
 
             {/* VERIFICATION REPORT ACCORDION CONTAINER */}
@@ -985,60 +929,6 @@ export default function App() {
                 </div>
               </div>
 
-            </div>
-          </div>
-        )}
-
-        {/* EXISTING PRODUCTS TAB */}
-        {activeTab === 'existing' && (
-          <div style={{ maxWidth: '1000px', margin: '0 auto', display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
-            <div className="glass-card">
-              <h2>Existing Products Registry</h2>
-              <p className="opacity-50" style={{ fontSize: '0.9rem', marginBottom: '1.5rem' }}>
-                Look up preloaded alcohol products, track how many compliance scans have been run on each, and load their configurations directly into the workstation.
-              </p>
-              
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-                {productRegistry.map(prod => (
-                  <div key={prod.id} style={{ background: '#ffffff', border: '1px solid var(--border-color)', borderLeft: `6px solid ${prod.lastStatus === 'COMPLIANT' ? 'var(--color-success)' : prod.lastStatus === 'NON-COMPLIANT' ? 'var(--color-error)' : 'var(--text-muted)'}`, padding: '1.25rem', borderRadius: '4px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem' }}>
-                    <div>
-                      <h3 style={{ color: 'var(--accent-navy)', fontSize: '1.15rem', marginBottom: '0.25rem' }}>{prod.brandName}</h3>
-                      <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
-                        {prod.classType} • {prod.abv} • {prod.volume}
-                      </p>
-                      <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginTop: '4px' }}>
-                        Producer: {prod.producer}
-                      </p>
-                    </div>
-                    
-                    <div className="flex-row align-center" style={{ gap: '1.5rem' }}>
-                      <div className="text-center" style={{ padding: '0 1rem', borderRight: '1px solid var(--border-color)' }}>
-                        <span className="form-label" style={{ fontSize: '0.7rem' }}>Total Scans</span>
-                        <div style={{ fontSize: '1.4rem', fontWeight: '700', fontFamily: 'var(--font-mono)' }}>{prod.scans}</div>
-                      </div>
-                      
-                      <div className="text-center" style={{ minWidth: '130px' }}>
-                        <span className="form-label" style={{ fontSize: '0.7rem' }}>Last Run Status</span>
-                        <div style={{ marginTop: '2px' }}>
-                          <span className={`badge badge-${prod.lastStatus === 'COMPLIANT' ? 'approved' : prod.lastStatus === 'NON-COMPLIANT' ? 'rejected' : 'pending'}`}>
-                            {prod.lastStatus}
-                          </span>
-                        </div>
-                      </div>
-                      
-                      <button 
-                        className="btn btn-primary" 
-                        onClick={() => {
-                          handleLoadPreset(prod.id);
-                          setActiveTab('single');
-                        }}
-                      >
-                        Load into Workstation
-                      </button>
-                    </div>
-                  </div>
-                ))}
-              </div>
             </div>
           </div>
         )}
