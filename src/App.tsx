@@ -52,9 +52,19 @@ const PRESET_OCR_TEXTS: Record<string, string> = {
 
 export default function App() {
   // Navigation & UI Configuration
-  const [activeTab, setActiveTab] = useState<'single' | 'batch'>('single');
+  const [activeTab, setActiveTab] = useState<'single' | 'existing' | 'batch'>('single');
   const [largeTextMode, setLargeTextMode] = useState(false);
   
+  // Product Registry with scan counters
+  const [productRegistry, setProductRegistry] = useState([
+    { id: 'app-101', brandName: 'OLD TOM DISTILLERY', classType: 'Kentucky Straight Bourbon Whiskey', abv: '45% Alc./Vol. (90 Proof)', volume: '750 mL', producer: 'Old Tom Distillery Co, Frankfort, KY', countryOfOrigin: 'United States', labelUrl: '/old_tom_bourbon_label.jpg', scans: 0, lastStatus: 'NEVER SCANNED' },
+    { id: 'app-102', brandName: "STONE'S THROW BREWING", classType: 'India Pale Ale (IPA)', abv: '6.8% Alc./Vol.', volume: '12 FL. OZ.', producer: 'Stone\'s Throw Brewing Co, Seattle, WA', countryOfOrigin: 'United States', labelUrl: '/stones_throw_beer_label.jpg', scans: 0, lastStatus: 'NEVER SCANNED' },
+    { id: 'app-103', brandName: 'CHATEAU BORDEAUX', classType: 'Bordeaux Red Wine', abv: '13.5% Alc. by Vol.', volume: '750 mL', producer: 'Chateau Bordeaux SA, Bordeaux, France', countryOfOrigin: 'France', labelUrl: '/chateau_bordeaux_label.jpg', scans: 0, lastStatus: 'NEVER SCANNED' }
+  ]);
+
+  // Keep track of active prefilled product ID
+  const [activeProductId, setActiveProductId] = useState<string | null>('app-101');
+
   // Single Workspace Form Input States
   const [formBrandName, setFormBrandName] = useState('OLD TOM DISTILLERY');
   const [formClassType, setFormClassType] = useState('Kentucky Straight Bourbon Whiskey');
@@ -85,6 +95,7 @@ export default function App() {
   const [isProcessingBatch, setIsProcessingBatch] = useState(false);
   const [batchList, setBatchList] = useState<Array<{ id: number; brand: string; result: string; errors: string[] }>>([]);
   const [batchProcessingSpeed, setBatchProcessingSpeed] = useState<number>(0);
+  const [batchFilter, setBatchFilter] = useState<'all' | 'non-compliant' | 'compliant'>('all');
 
   // Sync index.css large text mode
   useEffect(() => {
@@ -107,6 +118,7 @@ export default function App() {
       setFormCountryOfOrigin(app.countryOfOrigin);
       setLabelImage(app.labelUrl || '');
       setVerificationResult(null);
+      setActiveProductId(presetId);
       stopCamera();
     }
   };
@@ -194,11 +206,38 @@ export default function App() {
 
       const report = verifyLabelText(appConfig, finalOcrText, startTime);
       setVerificationResult(report);
+
+      // Increment scans count and update status
+      if (activeProductId) {
+        setProductRegistry(prev => prev.map(p => {
+          if (p.id === activeProductId) {
+            return {
+              ...p,
+              scans: p.scans + 1,
+              lastStatus: report.overallPassed ? 'COMPLIANT' : 'NON-COMPLIANT'
+            };
+          }
+          return p;
+        }));
+      }
     } catch (error) {
       console.error("OCR Scan Error:", error);
       setScanProgressText("Scan Error. Reverting to fallback rules.");
       const fallbackReport = verifyLabelText(appConfig, PRESET_OCR_TEXTS['old_tom_bourbon_label.jpg'], startTime);
       setVerificationResult(fallbackReport);
+      
+      if (activeProductId) {
+        setProductRegistry(prev => prev.map(p => {
+          if (p.id === activeProductId) {
+            return {
+              ...p,
+              scans: p.scans + 1,
+              lastStatus: fallbackReport.overallPassed ? 'COMPLIANT' : 'NON-COMPLIANT'
+            };
+          }
+          return p;
+        }));
+      }
     } finally {
       setIsScanning(false);
     }
@@ -363,7 +402,7 @@ export default function App() {
 
       {/* Main Tab Navigation */}
       <div style={{ padding: '1rem 1.5rem 0 1.5rem' }}>
-        <div className="tabs-navigation" style={{ maxWidth: '600px', margin: '0 auto' }}>
+        <div className="tabs-navigation" style={{ maxWidth: '800px', margin: '0 auto' }}>
           <button 
             className={`tab-btn ${activeTab === 'single' ? 'active' : ''}`} 
             onClick={() => {
@@ -374,6 +413,18 @@ export default function App() {
             <FileCheck size={18} />
             <span>Verify Single Label</span>
           </button>
+          
+          <button 
+            className={`tab-btn ${activeTab === 'existing' ? 'active' : ''}`} 
+            onClick={() => {
+              setActiveTab('existing');
+              stopCamera();
+            }}
+          >
+            <FolderOpen size={18} />
+            <span>Existing Products</span>
+          </button>
+
           <button 
             className={`tab-btn ${activeTab === 'batch' ? 'active' : ''}`} 
             onClick={() => {
@@ -381,7 +432,7 @@ export default function App() {
               stopCamera();
             }}
           >
-            <FolderOpen size={18} />
+            <Play size={18} />
             <span>Verify Batch Ingest</span>
           </button>
         </div>
@@ -393,27 +444,6 @@ export default function App() {
         {activeTab === 'single' && (
           <div style={{ maxWidth: '1200px', margin: '0 auto', display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
             
-            {/* Presets and loading toolbar */}
-            <div className="glass-card" style={{ padding: '1rem' }}>
-              <div className="flex-row align-center justify-between" style={{ flexWrap: 'wrap' }}>
-                <div>
-                  <strong style={{ color: 'var(--accent-gold)' }}>Quick Load TTB Test Presets:</strong>
-                  <p style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>Click to load sample labels & forms representing specific compliance checks.</p>
-                </div>
-                <div className="flex-row" style={{ flexWrap: 'wrap', gap: '0.5rem' }}>
-                  <button className="btn" onClick={() => handleLoadPreset('app-101')}>
-                    1. Old Tom Whiskey (Valid)
-                  </button>
-                  <button className="btn" style={{ borderColor: 'var(--color-warning)' }} onClick={() => handleLoadPreset('app-102')}>
-                    2. Stone's Throw Beer (Warning Errors)
-                  </button>
-                  <button className="btn" style={{ borderColor: 'var(--color-error)' }} onClick={() => handleLoadPreset('app-103')}>
-                    3. Chateau Bordeaux Wine (ABV Mismatch)
-                  </button>
-                </div>
-              </div>
-            </div>
-
             {/* Split Form and Artwork Workspace */}
             <div className="split-workspace" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1.5rem' }}>
               
@@ -423,7 +453,7 @@ export default function App() {
                   <h4>Application Form Fields</h4>
                 </div>
                 <div className="panel-body">
-                  <div className="form-grid" style={{ gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+                  <div className="form-vertical-stack">
                     <div className="form-group">
                       <label className="form-label">Brand Name (Required)</label>
                       <input 
@@ -484,7 +514,6 @@ export default function App() {
                         style={{ margin: 0 }}
                       />
                     </div>
-                    {/* Expected warning warning check is performed internally */}
                   </div>
                 </div>
               </div>
@@ -591,9 +620,19 @@ export default function App() {
                   </div>
                 </div>
                 {verificationResult && (
-                  <span className={`badge badge-${verificationResult.overallPassed ? 'approved' : 'rejected'}`} style={{ fontSize: '0.9rem', padding: '6px 12px' }}>
-                    {verificationResult.overallPassed ? '100% COMPLIANT' : 'DISCREPANCIES DETECTED'}
-                  </span>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+                    <span className={`badge badge-${verificationResult.overallPassed ? 'approved' : 'rejected'}`} style={{ fontSize: '0.9rem', padding: '6px 12px' }}>
+                      {verificationResult.overallPassed ? '100% COMPLIANT' : 'DISCREPANCIES DETECTED'}
+                    </span>
+                    
+                    <div className={`score-badge-circle ${
+                      verificationResult.complianceScore >= 95 ? 'score-pass' : 
+                      verificationResult.complianceScore >= 70 ? 'score-warning' : 'score-fail'
+                    }`}>
+                      <span className="score-val">{verificationResult.complianceScore}</span>
+                      <span className="score-label">Score</span>
+                    </div>
+                  </div>
                 )}
               </div>
 
@@ -703,6 +742,20 @@ export default function App() {
                         <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginTop: '4px' }}>{verificationResult.warningStatement.message}</p>
                       </div>
                     </div>
+
+                    {/* Additional TTB compliance rules */}
+                    {verificationResult.additionalChecks && verificationResult.additionalChecks.map((chk, idx) => (
+                      <div key={idx} className="result-row">
+                        <span className="result-field-name">{chk.name}</span>
+                        <div className="result-status-col">
+                          <span className={`status-indicator-dot dot-${chk.status === 'PASS' ? 'match' : chk.status === 'WARNING' ? 'partial' : 'missing'}`}></span>
+                          <span className={`text-${chk.status === 'PASS' ? 'match' : chk.status === 'WARNING' ? 'partial' : 'missing'}`}>{chk.status}</span>
+                        </div>
+                        <div className="result-details-col">
+                          <p style={{ fontSize: '0.90rem', fontWeight: '500' }}>{chk.message}</p>
+                        </div>
+                      </div>
+                    ))}
                   </div>
 
                   {/* Warning Highlight Box */}
@@ -865,7 +918,7 @@ export default function App() {
               </div>
 
               {/* Verified results list */}
-              <div className="batch-log-panel">
+              <div className="batch-log-panel" style={{ height: 'auto', maxHeight: '550px' }}>
                 <div className="batch-log-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                   <span>Verified Applications Report</span>
                   {batchList.length > 0 && (
@@ -874,6 +927,34 @@ export default function App() {
                     </button>
                   )}
                 </div>
+                
+                {batchList.length > 0 && (
+                  <>
+                    {/* Non-Compliant Alert Box listing all non-compliant IDs */}
+                    {batchList.filter(item => item.result !== 'Approved (Auto)').length > 0 && (
+                      <div className="batch-noncompliant-alert">
+                        <strong>⚠️ Non-Compliant Uploads Flagged:</strong>
+                        <p style={{ marginTop: '0.25rem', fontFamily: 'var(--font-mono)', wordBreak: 'break-all' }}>
+                          {batchList.filter(item => item.result !== 'Approved (Auto)').map(item => `#${item.id}`).join(', ')}
+                        </p>
+                      </div>
+                    )}
+
+                    {/* Filter bar */}
+                    <div className="batch-filter-bar">
+                      <button className={`batch-filter-btn ${batchFilter === 'all' ? 'active' : ''}`} onClick={() => setBatchFilter('all')}>
+                        All Uploads ({batchList.length})
+                      </button>
+                      <button className={`batch-filter-btn ${batchFilter === 'non-compliant' ? 'active' : ''}`} onClick={() => setBatchFilter('non-compliant')} style={{ color: 'var(--color-error)' }}>
+                        Non-Compliant Only ({batchList.filter(item => item.result !== 'Approved (Auto)').length})
+                      </button>
+                      <button className={`batch-filter-btn ${batchFilter === 'compliant' ? 'active' : ''}`} onClick={() => setBatchFilter('compliant')} style={{ color: 'var(--color-success)' }}>
+                        Compliant Only ({batchList.filter(item => item.result === 'Approved (Auto)').length})
+                      </button>
+                    </div>
+                  </>
+                )}
+
                 <div className="batch-log-list" style={{ fontFamily: 'var(--font-sans)', fontSize: '0.85rem' }}>
                   {batchList.length === 0 ? (
                     <div style={{ color: 'var(--text-muted)', textAlign: 'center', paddingTop: '4rem' }}>
@@ -881,7 +962,11 @@ export default function App() {
                     </div>
                   ) : (
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-                      {batchList.map((item, idx) => (
+                      {batchList.filter(item => {
+                        if (batchFilter === 'compliant') return item.result === 'Approved (Auto)';
+                        if (batchFilter === 'non-compliant') return item.result !== 'Approved (Auto)';
+                        return true;
+                      }).map((item, idx) => (
                         <div key={idx} style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.04)', padding: '0.5rem 0.75rem', borderRadius: '6px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                           <div>
                             <span style={{ fontFamily: 'var(--font-mono)', fontSize: '0.75rem', color: 'var(--text-muted)' }}>#{item.id}</span>
@@ -904,6 +989,60 @@ export default function App() {
                 </div>
               </div>
 
+            </div>
+          </div>
+        )}
+
+        {/* EXISTING PRODUCTS TAB */}
+        {activeTab === 'existing' && (
+          <div style={{ maxWidth: '1000px', margin: '0 auto', display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+            <div className="glass-card">
+              <h2>Existing Products Registry</h2>
+              <p className="opacity-50" style={{ fontSize: '0.9rem', marginBottom: '1.5rem' }}>
+                Look up preloaded alcohol products, track how many compliance scans have been run on each, and load their configurations directly into the workstation.
+              </p>
+              
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                {productRegistry.map(prod => (
+                  <div key={prod.id} style={{ background: '#ffffff', border: '1px solid var(--border-color)', borderLeft: `6px solid ${prod.lastStatus === 'COMPLIANT' ? 'var(--color-success)' : prod.lastStatus === 'NON-COMPLIANT' ? 'var(--color-error)' : 'var(--text-muted)'}`, padding: '1.25rem', borderRadius: '4px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem' }}>
+                    <div>
+                      <h3 style={{ color: 'var(--accent-navy)', fontSize: '1.15rem', marginBottom: '0.25rem' }}>{prod.brandName}</h3>
+                      <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
+                        {prod.classType} • {prod.abv} • {prod.volume}
+                      </p>
+                      <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginTop: '4px' }}>
+                        Producer: {prod.producer}
+                      </p>
+                    </div>
+                    
+                    <div className="flex-row align-center" style={{ gap: '1.5rem' }}>
+                      <div className="text-center" style={{ padding: '0 1rem', borderRight: '1px solid var(--border-color)' }}>
+                        <span className="form-label" style={{ fontSize: '0.7rem' }}>Total Scans</span>
+                        <div style={{ fontSize: '1.4rem', fontWeight: '700', fontFamily: 'var(--font-mono)' }}>{prod.scans}</div>
+                      </div>
+                      
+                      <div className="text-center" style={{ minWidth: '130px' }}>
+                        <span className="form-label" style={{ fontSize: '0.7rem' }}>Last Run Status</span>
+                        <div style={{ marginTop: '2px' }}>
+                          <span className={`badge badge-${prod.lastStatus === 'COMPLIANT' ? 'approved' : prod.lastStatus === 'NON-COMPLIANT' ? 'rejected' : 'pending'}`}>
+                            {prod.lastStatus}
+                          </span>
+                        </div>
+                      </div>
+                      
+                      <button 
+                        className="btn btn-primary" 
+                        onClick={() => {
+                          handleLoadPreset(prod.id);
+                          setActiveTab('single');
+                        }}
+                      >
+                        Load into Workstation
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
             </div>
           </div>
         )}

@@ -62,4 +62,5 @@ export interface VerificationResult {
   ocrRawText: string;
   processingTimeMs: number;
   additionalChecks: AdditionalCheck[];
+  complianceScore: number;
 }

@@ -411,6 +411,34 @@ export function verifyLabelText(app: ColaApplication, ocrText: string, startTime
     }
   }
 
+  // 7.8 COMPLIANCE SCORE COMPUTATION
+  let score = 100;
+  
+  if (brandVerification.status === 'MISMATCH') score -= 20;
+  else if (brandVerification.status === 'PARTIAL') score -= 5;
+  
+  if (classVerification.status === 'MISMATCH') score -= 15;
+  else if (classVerification.status === 'PARTIAL') score -= 5;
+  
+  if (abvVerification.status === 'MISMATCH') score -= 20;
+  
+  if (volumeVerification.status === 'MISMATCH') score -= 15;
+  else if (volumeVerification.status === 'PARTIAL') score -= 5;
+  
+  if (producerVerification.status === 'MISMATCH') score -= 10;
+  else if (producerVerification.status === 'PARTIAL') score -= 3;
+  
+  if (originVerification.status === 'MISMATCH') score -= 10;
+  
+  if (warningVerification.status === 'MISMATCH') score -= 20;
+  else if (warningVerification.status === 'PARTIAL') score -= 5;
+  
+  additionalChecks.forEach(chk => {
+    if (chk.status === 'WARNING') score -= 3;
+  });
+  
+  const complianceScore = Math.max(0, score);
+
   // 8. OVERALL PASSED DECISION
   const overallPassed = 
     brandVerification.status !== 'MISMATCH' &&
@@ -434,6 +462,7 @@ export function verifyLabelText(app: ColaApplication, ocrText: string, startTime
     overallPassed,
     ocrRawText: ocrText,
     processingTimeMs,
-    additionalChecks
+    additionalChecks,
+    complianceScore
   };
 }
