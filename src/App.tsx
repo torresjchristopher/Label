@@ -98,6 +98,29 @@ export default function App() {
     volume: ''
   });
 
+  const [showEditDrawer, setShowEditDrawer] = useState(false);
+  const lastAudioStatusRef = useRef<string | null>(null);
+
+  const isAnyFieldFilled = Boolean(
+    formBrandName.trim() ||
+    formClassType.trim() ||
+    formAbv.trim() ||
+    formVolume.trim() ||
+    formProducer.trim() ||
+    formCountryOfOrigin.trim()
+  );
+
+  const isFormComplete = Boolean(
+    formBrandName.trim() &&
+    formClassType.trim() &&
+    formAbv.trim() &&
+    formVolume.trim() &&
+    formProducer.trim() &&
+    formCountryOfOrigin.trim()
+  );
+
+  const isScanEligible = !isAnyFieldFilled || isFormComplete;
+
   useEffect(() => {
     const checkMobile = () => {
       setIsMobile(window.innerWidth < 768);
@@ -106,6 +129,13 @@ export default function App() {
     window.addEventListener('resize', checkMobile);
     return () => window.removeEventListener('resize', checkMobile);
   }, []);
+
+  // Auto-launch camera when opening on mobile
+  useEffect(() => {
+    if (isMobile && !cameraActive) {
+      startCamera();
+    }
+  }, [isMobile]);
 
   // Sync index.css large text mode
   useEffect(() => {
@@ -118,7 +148,7 @@ export default function App() {
 
   const [soundEnabled, setSoundEnabled] = useState(true);
 
-  // Live viewfinder frame scan states
+  // Live viewfinder automatic 4-second background snapshot scanner
   const [liveScanResult, setLiveScanResult] = useState<VerificationResult | null>(null);
   const [isLiveScanningFrame, setIsLiveScanningFrame] = useState(false);
   const liveScanIntervalRef = useRef<any>(null);
@@ -126,7 +156,7 @@ export default function App() {
   useEffect(() => {
     if (cameraActive) {
       liveScanIntervalRef.current = setInterval(async () => {
-        if (isLiveScanningFrame || isScanning) return;
+        if (isLiveScanningFrame || isScanning || !isScanEligible) return;
         
         if (videoRef.current && videoRef.current.readyState === 4) {
           setIsLiveScanningFrame(true);
@@ -142,6 +172,7 @@ export default function App() {
               
               const { data: { text } } = await Tesseract.recognize(dataUrl, 'eng');
               
+              // Only process snapshot if label text components are detected in frame
               if (text && text.trim().length > 10) {
                 const appConfig: ColaApplication = {
                   id: 'custom-app',
@@ -161,6 +192,21 @@ export default function App() {
                 const startTime = Date.now();
                 const report = verifyLabelText(appConfig, text, startTime);
                 setLiveScanResult(report);
+                setVerificationResult(report);
+                setLabelImage(dataUrl);
+
+                // Audio deduplication: Trigger audio cue only when status changes
+                const currentStatus = report.overallPassed ? 'PASS' : 'FAIL';
+                if (lastAudioStatusRef.current !== currentStatus) {
+                  lastAudioStatusRef.current = currentStatus;
+                  if (soundEnabled) {
+                    if (report.overallPassed) playPassTone();
+                    else playFailTone();
+                  }
+                  triggerHapticFeedback(report.overallPassed);
+                }
+              } else {
+                setLiveScanResult(null);
               }
             }
           } catch (err) {
@@ -169,13 +215,14 @@ export default function App() {
             setIsLiveScanningFrame(false);
           }
         }
-      }, 2500);
+      }, 4000);
     } else {
       if (liveScanIntervalRef.current) {
         clearInterval(liveScanIntervalRef.current);
         liveScanIntervalRef.current = null;
       }
       setLiveScanResult(null);
+      lastAudioStatusRef.current = null;
     }
 
     return () => {
@@ -183,7 +230,7 @@ export default function App() {
         clearInterval(liveScanIntervalRef.current);
       }
     };
-  }, [cameraActive, formBrandName, formClassType, formAbv, formVolume, isLiveScanningFrame, isScanning]);
+  }, [cameraActive, formBrandName, formClassType, formAbv, formVolume, isLiveScanningFrame, isScanning, isScanEligible, soundEnabled]);
 
   // Export current form fields to a JSON text file for pre-fill
   const handleExportPrefill = () => {
@@ -633,43 +680,6 @@ export default function App() {
     setCameraActive(false);
   };
 
-  const handleSnapAndVerify = async () => {
-    if (videoRef.current) {
-      const canvas = document.createElement('canvas');
-      canvas.width = videoRef.current.videoWidth || 640;
-      canvas.height = videoRef.current.videoHeight || 480;
-      const ctx = canvas.getContext('2d');
-      if (ctx) {
-        ctx.drawImage(videoRef.current, 0, 0, canvas.width, canvas.height);
-        const processedCanvas = preprocessCanvasForOcr(canvas);
-        const dataUrl = processedCanvas.toDataURL('image/jpeg');
-        setLabelImage(dataUrl);
-        stopCamera();
-        await runComplianceCheckWithImage(dataUrl);
-      }
-    }
-  };
-
-  const isAnyFieldFilled = Boolean(
-    formBrandName.trim() ||
-    formClassType.trim() ||
-    formAbv.trim() ||
-    formVolume.trim() ||
-    formProducer.trim() ||
-    formCountryOfOrigin.trim()
-  );
-
-  const isFormComplete = Boolean(
-    formBrandName.trim() &&
-    formClassType.trim() &&
-    formAbv.trim() &&
-    formVolume.trim() &&
-    formProducer.trim() &&
-    formCountryOfOrigin.trim()
-  );
-
-  const isScanEligible = !isAnyFieldFilled || isFormComplete;
-
   const resetDashboard = () => {
     setVerificationResult(null);
     setBatchList([]);
@@ -872,24 +882,128 @@ export default function App() {
                         </div>
                       )}
 
-                      {/* Camera active mode */}
+                      {/* Full-Screen Camera Mode */}
                       {cameraActive && (
-                        <div style={{ width: '100%', height: '100%', position: 'absolute', inset: 0 }}>
-                          <video ref={videoRef} className="camera-viewfinder" playsInline muted></video>
-                          <div className={`viewfinder-reticle ${liveScanResult ? (liveScanResult.overallPassed ? 'pass' : 'fail') : ''}`} style={{ left: '10%', top: '15%' }}>
+                        <div className="fullscreen-camera-overlay">
+                          <video ref={videoRef} className="fullscreen-camera-video" autoPlay playsInline muted></video>
+                          
+                          {/* Top Bar Controls */}
+                          <div className="camera-top-bar">
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', background: 'rgba(0,0,0,0.65)', padding: '8px 16px', borderRadius: '20px', backdropFilter: 'blur(8px)' }}>
+                              <ShieldCheck size={20} style={{ color: liveScanResult ? (liveScanResult.overallPassed ? 'var(--color-success)' : 'var(--color-error)') : 'var(--accent-gold)' }} />
+                              <span style={{ fontSize: '0.85rem', fontWeight: 700, color: '#fff' }}>
+                                {liveScanResult ? (liveScanResult.overallPassed ? '100% COMPLIANT' : 'DISCREPANCY DETECTED') : 'AUTOMATIC LIVE SCANNING'}
+                              </span>
+                            </div>
+                            
+                            <div style={{ display: 'flex', gap: '0.5rem' }}>
+                              <button 
+                                type="button" 
+                                className={`access-control-btn ${soundEnabled ? 'active' : ''}`}
+                                onClick={() => setSoundEnabled(!soundEnabled)}
+                                style={{ background: 'rgba(0,0,0,0.65)', color: '#fff', padding: '8px 12px', borderRadius: '20px' }}
+                              >
+                                {soundEnabled ? <Volume2 size={16} /> : <VolumeX size={16} />}
+                              </button>
+                              <button 
+                                type="button" 
+                                className="btn"
+                                onClick={stopCamera}
+                                style={{ background: 'rgba(255,255,255,0.2)', color: '#fff', padding: '8px 16px', borderRadius: '20px', fontSize: '0.85rem' }}
+                              >
+                                📊 Exit to Dashboard
+                              </button>
+                            </div>
+                          </div>
+
+                          {/* Reticle box overlay */}
+                          <div className={`viewfinder-reticle ${liveScanResult ? (liveScanResult.overallPassed ? 'pass' : 'fail') : ''}`} style={{ left: '12.5%', top: '15%' }}>
                             <div className="viewfinder-corners"></div>
                           </div>
-                          <div className="scanner-controls" style={{ padding: '0 1rem', width: '100%', boxSizing: 'border-box' }}>
+
+                          {/* Bottom Action Bar */}
+                          <div className="camera-bottom-bar">
                             <button 
                               type="button" 
-                              className="btn btn-primary w-full" 
-                              onClick={handleSnapAndVerify} 
-                              style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem', boxShadow: '0 0 20px rgba(212,175,55,0.4)', padding: '14px 16px', fontSize: '1.05rem', fontWeight: 700 }}
+                              className="btn"
+                              onClick={() => setShowEditDrawer(!showEditDrawer)}
+                              style={{ background: 'rgba(255,255,255,0.25)', color: '#fff', padding: '12px 20px', borderRadius: '30px', backdropFilter: 'blur(8px)', fontWeight: 600 }}
                             >
-                              <Sparkles size={18} />
-                              <span>SNAP & VERIFY LABEL</span>
+                              ✏️ Edit Application Details
+                            </button>
+
+                            {liveScanResult && !liveScanResult.overallPassed && (
+                              <button 
+                                type="button" 
+                                className="btn btn-danger"
+                                onClick={() => {
+                                  accumulateVerificationReport(liveScanResult);
+                                  stopCamera();
+                                }}
+                                style={{ padding: '12px 20px', borderRadius: '30px', fontWeight: 700, boxShadow: '0 0 20px rgba(214,40,40,0.6)' }}
+                              >
+                                ⚠️ Record Failure to Audit Log
+                              </button>
+                            )}
+
+                            <button 
+                              type="button" 
+                              className="btn btn-primary"
+                              onClick={stopCamera}
+                              style={{ padding: '12px 20px', borderRadius: '30px', fontWeight: 700 }}
+                            >
+                              📊 View Full Report
                             </button>
                           </div>
+
+                          {/* Slide-Up Edit Form Drawer inside Camera View */}
+                          {showEditDrawer && (
+                            <div className="camera-drawer-panel">
+                              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem', paddingBottom: '0.75rem', borderBottom: '1px solid var(--border-color)' }}>
+                                <h4 style={{ margin: 0, color: 'var(--accent-navy)' }}>Edit Application Details</h4>
+                                <button type="button" className="btn" onClick={() => setShowEditDrawer(false)} style={{ padding: '4px 12px', fontSize: '0.8rem' }}>
+                                  Done / Close
+                                </button>
+                              </div>
+
+                              <div className="form-vertical-stack">
+                                <div className="form-group-horizontal">
+                                  <label className="form-label">Brand Name</label>
+                                  <input type="text" className="db-search-input" value={formBrandName} onChange={e => { setFormBrandName(e.target.value); resetDashboard(); }} />
+                                </div>
+                                <div className="form-group-horizontal">
+                                  <label className="form-label">Class & Type</label>
+                                  <input type="text" className="db-search-input" value={formClassType} onChange={e => { setFormClassType(e.target.value); resetDashboard(); }} />
+                                </div>
+                                <div className="form-group-horizontal">
+                                  <label className="form-label">Alcohol Content (ABV %)</label>
+                                  <input type="text" className="db-search-input" value={formAbv} onChange={e => { setFormAbv(e.target.value); resetDashboard(); }} />
+                                </div>
+                                <div className="form-group-horizontal">
+                                  <label className="form-label">Net Contents</label>
+                                  <input type="text" className="db-search-input" value={formVolume} onChange={e => { setFormVolume(e.target.value); resetDashboard(); }} />
+                                </div>
+                                <div className="form-group-horizontal">
+                                  <label className="form-label">Bottler / Producer</label>
+                                  <input type="text" className="db-search-input" value={formProducer} onChange={e => { setFormProducer(e.target.value); resetDashboard(); }} />
+                                </div>
+                                <div className="form-group-horizontal">
+                                  <label className="form-label">Country of Origin</label>
+                                  <input type="text" className="db-search-input" value={formCountryOfOrigin} onChange={e => { setFormCountryOfOrigin(e.target.value); resetDashboard(); }} />
+                                </div>
+                              </div>
+
+                              <div style={{ display: 'flex', gap: '0.75rem', marginTop: '1.25rem', paddingTop: '1rem', borderTop: '1px solid var(--border-color)' }}>
+                                <button type="button" className={`btn btn-save-info ${isFormComplete ? 'eligible' : 'disabled'}`} onClick={handleExportPrefill} disabled={!isFormComplete} style={{ flexGrow: 1, fontSize: '0.85rem' }}>
+                                  <Download size={14} /> Save Info File
+                                </button>
+                                <label className="btn" style={{ flexGrow: 1, fontSize: '0.85rem', cursor: 'pointer', margin: 0, background: 'var(--bg-tertiary)', border: '1px solid var(--border-color)', textAlign: 'center' }}>
+                                  <UploadCloud size={14} /> Load Info File
+                                  <input type="file" accept=".txt" onChange={handleImportPrefill} style={{ display: 'none' }} />
+                                </label>
+                              </div>
+                            </div>
+                          )}
                         </div>
                       )}
 

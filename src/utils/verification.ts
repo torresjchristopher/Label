@@ -54,19 +54,24 @@ export function verifyLabelText(app: ColaApplication, ocrText: string, startTime
   
   // 1. BRAND NAME VERIFICATION
   let brandStatus: FieldVerification['status'] = 'MISMATCH';
-  let brandMsg = 'Brand name not found on the label.';
+  let brandMsg = 'Brand name header not found on label.';
   let brandVerification: FieldVerification;
   
   const expectedBrand = app.brandName;
   if (isStandaloneMonitoring) {
     const lines = ocrText.split('\n').map(l => l.trim()).filter(l => l.length > 2 && !l.toLowerCase().includes('warning') && !l.toLowerCase().includes('alc'));
-    const detectedBrand = lines[0] || 'Unspecified Brand';
-    brandStatus = 'MATCH';
-    brandMsg = `Standalone Scan: Detected brand header "${detectedBrand}" on label.`;
+    const detectedBrand = lines[0] || '';
+    if (detectedBrand) {
+      brandStatus = 'MATCH';
+      brandMsg = `Standalone Scan: Detected brand title "${detectedBrand}" on label artwork.`;
+    } else {
+      brandStatus = 'MISMATCH';
+      brandMsg = 'Standalone Scan: Mandatory brand title header missing from label.';
+    }
     brandVerification = {
       status: brandStatus,
-      expected: 'Label Brand Detection',
-      actual: detectedBrand,
+      expected: 'Mandatory Brand Title Header',
+      actual: detectedBrand || 'Not detected',
       message: brandMsg
     };
   } else {
@@ -77,7 +82,7 @@ export function verifyLabelText(app: ColaApplication, ocrText: string, startTime
       const actualText = brandMatch[0];
       if (actualText === expectedBrand) {
         brandStatus = 'MATCH';
-        brandMsg = 'Brand name matches exactly.';
+        brandMsg = 'Brand name matches application exactly.';
       } else if (actualText.toLowerCase() === expectedBrand.toLowerCase()) {
         brandStatus = 'MATCH';
         brandMsg = 'Brand name matches (acceptable TTB casing discrepancy).';
@@ -124,10 +129,10 @@ export function verifyLabelText(app: ColaApplication, ocrText: string, startTime
     if (foundTerm) {
       classStatus = 'MATCH';
       detectedClass = foundTerm.toUpperCase();
-      classMsg = `Standalone Scan: Mandatory class/type designation detected ("${foundTerm}").`;
+      classMsg = `Standalone Scan: Mandatory class/type designation detected ("${detectedClass}").`;
     } else {
-      classStatus = 'PARTIAL';
-      classMsg = 'Standalone Scan: Class/Type term not explicitly matched in OCR text.';
+      classStatus = 'MISMATCH';
+      classMsg = 'Standalone Scan: Mandatory beverage class/type designation missing from label.';
     }
   } else {
     const ocrHasClassExact = ocrText.includes(expectedClass);
@@ -150,7 +155,7 @@ export function verifyLabelText(app: ColaApplication, ocrText: string, startTime
   
   const classVerification: FieldVerification = {
     status: classStatus,
-    expected: expectedClass || 'Mandatory Class/Type',
+    expected: expectedClass || 'Mandatory Beverage Class/Type',
     actual: detectedClass,
     message: classMsg
   };
@@ -185,7 +190,7 @@ export function verifyLabelText(app: ColaApplication, ocrText: string, startTime
   
   const abvVerification: FieldVerification = {
     status: abvStatus,
-    expected: app.abv || 'Mandatory ABV %',
+    expected: app.abv || 'Mandatory ABV % Statement',
     actual: detectedAbv,
     message: abvMsg
   };
@@ -200,7 +205,7 @@ export function verifyLabelText(app: ColaApplication, ocrText: string, startTime
   const volMatch = normOcrLower.match(volumeRegex);
   
   if (volMatch) {
-    detectedVol = volMatch[0];
+    detectedVol = volMatch[0].toUpperCase();
     const actualVolClean = normalize(detectedVol);
     
     if (isStandaloneMonitoring) {
@@ -223,7 +228,7 @@ export function verifyLabelText(app: ColaApplication, ocrText: string, startTime
   
   const volumeVerification: FieldVerification = {
     status: volStatus,
-    expected: app.volume,
+    expected: app.volume || 'Mandatory Net Contents Statement',
     actual: detectedVol,
     message: volMsg
   };
