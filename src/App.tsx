@@ -629,23 +629,6 @@ export default function App() {
     setCameraActive(false);
   };
 
-  const captureImageAndLoad = () => {
-    if (videoRef.current) {
-      const canvas = document.createElement('canvas');
-      canvas.width = videoRef.current.videoWidth || 640;
-      canvas.height = videoRef.current.videoHeight || 480;
-      const ctx = canvas.getContext('2d');
-      if (ctx) {
-        ctx.drawImage(videoRef.current, 0, 0, canvas.width, canvas.height);
-        const dataUrl = canvas.toDataURL('image/jpeg');
-        console.log("Captured image data size:", dataUrl.length);
-        stopCamera();
-        setLabelImage(dataUrl);
-        setVerificationResult(null);
-      }
-    }
-  };
-
   const handleSnapAndVerify = async () => {
     if (videoRef.current) {
       const canvas = document.createElement('canvas');
@@ -881,23 +864,15 @@ export default function App() {
                           <div className={`viewfinder-reticle ${liveScanResult ? (liveScanResult.overallPassed ? 'pass' : 'fail') : ''}`} style={{ left: '10%', top: '15%' }}>
                             <div className="viewfinder-corners"></div>
                           </div>
-                          <div className="scanner-controls" style={{ gap: '0.75rem', padding: '0 1rem', width: '100%', boxSizing: 'border-box' }}>
+                          <div className="scanner-controls" style={{ padding: '0 1rem', width: '100%', boxSizing: 'border-box' }}>
                             <button 
                               type="button" 
-                              className="btn btn-primary" 
+                              className="btn btn-primary w-full" 
                               onClick={handleSnapAndVerify} 
-                              style={{ flexGrow: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.4rem', boxShadow: '0 0 20px rgba(212,175,55,0.4)', padding: '12px 16px' }}
+                              style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem', boxShadow: '0 0 20px rgba(212,175,55,0.4)', padding: '14px 16px', fontSize: '1.05rem', fontWeight: 700 }}
                             >
-                              <Sparkles size={16} />
-                              <span>SNAP & VERIFY</span>
-                            </button>
-                            <button 
-                              type="button" 
-                              className="btn" 
-                              onClick={captureImageAndLoad} 
-                              style={{ background: 'var(--bg-secondary)', color: 'var(--text-primary)', padding: '12px 16px' }}
-                            >
-                              CAPTURE ONLY
+                              <Sparkles size={18} />
+                              <span>SNAP & VERIFY LABEL</span>
                             </button>
                           </div>
                         </div>
