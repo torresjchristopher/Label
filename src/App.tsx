@@ -492,6 +492,10 @@ export default function App() {
   // Trigger TTB compliance scan with specific image source
   const runComplianceCheckWithImage = async (imageSrc: string | null) => {
     if (!imageSrc) return;
+    if (!isScanEligible) {
+      alert('Form is partially filled. Please complete all 6 fields to run application verification, or clear all fields to run standalone TTB label monitoring.');
+      return;
+    }
     setIsScanning(true);
     setScanProgress(0);
     setScanProgressText('Initializing local OCR Engine...');
@@ -646,6 +650,15 @@ export default function App() {
     }
   };
 
+  const isAnyFieldFilled = Boolean(
+    formBrandName.trim() ||
+    formClassType.trim() ||
+    formAbv.trim() ||
+    formVolume.trim() ||
+    formProducer.trim() ||
+    formCountryOfOrigin.trim()
+  );
+
   const isFormComplete = Boolean(
     formBrandName.trim() &&
     formClassType.trim() &&
@@ -654,6 +667,8 @@ export default function App() {
     formProducer.trim() &&
     formCountryOfOrigin.trim()
   );
+
+  const isScanEligible = !isAnyFieldFilled || isFormComplete;
 
   const resetDashboard = () => {
     setVerificationResult(null);
@@ -909,13 +924,21 @@ export default function App() {
                       </div>
                     )}
 
+                    {/* Partial fill warning message */}
+                    {!isScanEligible && (
+                      <div style={{ marginTop: '1rem', padding: '0.75rem 1rem', background: 'var(--color-warning-bg)', border: '1px solid var(--color-warning-border)', borderRadius: '4px', fontSize: '0.82rem', color: 'var(--color-warning)', textAlign: 'center' }}>
+                        ⚠️ <strong>Form Partially Filled:</strong> Complete all 6 product fields to run application vs. label matching, or clear all fields to monitor general TTB label compliance.
+                      </div>
+                    )}
+
                     {/* Verify TTB Compliance Button */}
-                    <div style={{ marginTop: '1.5rem' }}>
+                    <div style={{ marginTop: '1.25rem' }}>
                       <button 
-                        className="btn btn-primary btn-large" 
+                        className={`btn ${isScanEligible ? 'btn-primary' : 'btn-secondary'} btn-large`} 
                         onClick={handleRunComplianceCheck}
-                        disabled={isScanning || !labelImage}
-                        style={{ width: '100%', fontSize: '1.1rem', boxShadow: '0 0 25px rgba(212,175,55,0.3)' }}
+                        disabled={isScanning || !labelImage || !isScanEligible}
+                        style={{ width: '100%', fontSize: '1.1rem', boxShadow: isScanEligible ? '0 0 25px rgba(212,175,55,0.3)' : 'none', opacity: isScanEligible ? 1 : 0.5, cursor: isScanEligible ? 'pointer' : 'not-allowed' }}
+                        title={!isScanEligible ? "Fill all 6 fields or clear all fields to enable compliance verification" : "Verify TTB Compliance"}
                       >
                         <Sparkles size={20} />
                         <span>Verify TTB Compliance</span>

@@ -50,6 +50,7 @@ function getBrandRegex(brand: string): RegExp {
 
 export function verifyLabelText(app: ColaApplication, ocrText: string, startTime: number): VerificationResult {
   const normOcrLower = normalizeOcrNumbers(ocrText.toLowerCase());
+  const isStandaloneMonitoring = !app.brandName.trim() && !app.classType.trim() && !app.abv.trim();
   
   // 1. BRAND NAME VERIFICATION
   let brandStatus: FieldVerification['status'] = 'MISMATCH';
@@ -57,70 +58,100 @@ export function verifyLabelText(app: ColaApplication, ocrText: string, startTime
   let brandVerification: FieldVerification;
   
   const expectedBrand = app.brandName;
-  const brandRegex = getBrandRegex(expectedBrand);
-  const brandMatch = ocrText.match(brandRegex);
-  
-  if (brandMatch) {
-    const actualText = brandMatch[0];
-    if (actualText === expectedBrand) {
-      brandStatus = 'MATCH';
-      brandMsg = 'Brand name matches exactly.';
-    } else if (actualText.toLowerCase() === expectedBrand.toLowerCase()) {
-      brandStatus = 'MATCH';
-      brandMsg = 'Brand name matches (acceptable TTB casing discrepancy).';
-    } else {
-      brandStatus = 'MATCH';
-      brandMsg = 'Brand name matches (normalized casing and punctuation discrepancy).';
-    }
+  if (isStandaloneMonitoring) {
+    const lines = ocrText.split('\n').map(l => l.trim()).filter(l => l.length > 2 && !l.toLowerCase().includes('warning') && !l.toLowerCase().includes('alc'));
+    const detectedBrand = lines[0] || 'Unspecified Brand';
+    brandStatus = 'MATCH';
+    brandMsg = `Standalone Scan: Detected brand header "${detectedBrand}" on label.`;
     brandVerification = {
       status: brandStatus,
-      expected: expectedBrand,
-      actual: actualText,
-      message: brandMsg
-    };
-  } else if (fuzzyContains(ocrText, expectedBrand)) {
-    brandStatus = 'PARTIAL';
-    brandMsg = 'Brand name matches fuzzily. Please confirm visually.';
-    brandVerification = {
-      status: brandStatus,
-      expected: expectedBrand,
-      actual: 'Detected fuzzily',
+      expected: 'Label Brand Detection',
+      actual: detectedBrand,
       message: brandMsg
     };
   } else {
-    brandStatus = 'MISMATCH';
-    brandMsg = 'Brand name not found on the label.';
-    brandVerification = {
-      status: brandStatus,
-      expected: expectedBrand,
-      actual: 'Not detected',
-      message: brandMsg
-    };
+    const brandRegex = getBrandRegex(expectedBrand);
+    const brandMatch = ocrText.match(brandRegex);
+    
+    if (brandMatch) {
+      const actualText = brandMatch[0];
+      if (actualText === expectedBrand) {
+        brandStatus = 'MATCH';
+        brandMsg = 'Brand name matches exactly.';
+      } else if (actualText.toLowerCase() === expectedBrand.toLowerCase()) {
+        brandStatus = 'MATCH';
+        brandMsg = 'Brand name matches (acceptable TTB casing discrepancy).';
+      } else {
+        brandStatus = 'MATCH';
+        brandMsg = 'Brand name matches (normalized casing and punctuation discrepancy).';
+      }
+      brandVerification = {
+        status: brandStatus,
+        expected: expectedBrand,
+        actual: actualText,
+        message: brandMsg
+      };
+    } else if (fuzzyContains(ocrText, expectedBrand)) {
+      brandStatus = 'PARTIAL';
+      brandMsg = 'Brand name matches fuzzily. Please confirm visually.';
+      brandVerification = {
+        status: brandStatus,
+        expected: expectedBrand,
+        actual: 'Detected fuzzily',
+        message: brandMsg
+      };
+    } else {
+      brandStatus = 'MISMATCH';
+      brandMsg = 'Brand name not found on the label.';
+      brandVerification = {
+        status: brandStatus,
+        expected: expectedBrand,
+        actual: 'Not detected',
+        message: brandMsg
+      };
+    }
   }
 
   // 2. CLASS/TYPE VERIFICATION
   let classStatus: FieldVerification['status'] = 'MISMATCH';
   let classMsg = 'Class/Type designation not found on label.';
+  let detectedClass = 'Not detected';
   
   const expectedClass = app.classType;
-  const ocrHasClassExact = ocrText.includes(expectedClass);
-  const ocrHasClassLower = normOcrLower.includes(expectedClass.toLowerCase());
-  
-  if (ocrHasClassExact) {
-    classStatus = 'MATCH';
-    classMsg = 'Class/Type matches exactly.';
-  } else if (ocrHasClassLower) {
-    classStatus = 'PARTIAL';
-    classMsg = 'Class/Type matches, but casing differs.';
-  } else if (fuzzyContains(ocrText, expectedClass)) {
-    classStatus = 'PARTIAL';
-    classMsg = 'Class/Type matches fuzzily (e.g. contains key terms).';
+  if (isStandaloneMonitoring) {
+    const classTerms = ['whiskey', 'bourbon', 'whisky', 'beer', 'ale', 'ipa', 'wine', 'vodka', 'rum', 'tequila', 'gin', 'brandy', 'spirits', 'stout', 'lager'];
+    const foundTerm = classTerms.find(term => normOcrLower.includes(term));
+    if (foundTerm) {
+      classStatus = 'MATCH';
+      detectedClass = foundTerm.toUpperCase();
+      classMsg = `Standalone Scan: Mandatory class/type designation detected ("${foundTerm}").`;
+    } else {
+      classStatus = 'PARTIAL';
+      classMsg = 'Standalone Scan: Class/Type term not explicitly matched in OCR text.';
+    }
+  } else {
+    const ocrHasClassExact = ocrText.includes(expectedClass);
+    const ocrHasClassLower = normOcrLower.includes(expectedClass.toLowerCase());
+    
+    if (ocrHasClassExact) {
+      classStatus = 'MATCH';
+      classMsg = 'Class/Type matches exactly.';
+      detectedClass = expectedClass;
+    } else if (ocrHasClassLower) {
+      classStatus = 'PARTIAL';
+      classMsg = 'Class/Type matches, but casing differs.';
+      detectedClass = expectedClass;
+    } else if (fuzzyContains(ocrText, expectedClass)) {
+      classStatus = 'PARTIAL';
+      classMsg = 'Class/Type matches fuzzily (e.g. contains key terms).';
+      detectedClass = 'Fuzzy match';
+    }
   }
   
   const classVerification: FieldVerification = {
     status: classStatus,
-    expected: expectedClass,
-    actual: ocrText.match(new RegExp(expectedClass.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&'), 'i'))?.[0] || 'Not detected',
+    expected: expectedClass || 'Mandatory Class/Type',
+    actual: detectedClass,
     message: classMsg
   };
 
@@ -129,10 +160,7 @@ export function verifyLabelText(app: ColaApplication, ocrText: string, startTime
   let abvMsg = 'ABV statement not found or incorrect.';
   let detectedAbv = 'Not detected';
   
-  // Normalize ABV representation, e.g. "45%" or "13.5%"
   const expectedAbvVal = app.abv.match(/\d+(?:\.\d+)?/)?.[0] || '';
-  
-  // Search for ABV in OCR text: e.g. "45% alc", "13.5% alc", "45% alc./vol", "45% vol"
   const abvRegex = /(\d+(?:\.\d+)?)\s*%\s*(?:alc|vol|abv|by\s*vol)?/i;
   const abvMatch = normOcrLower.match(abvRegex);
   
@@ -140,19 +168,24 @@ export function verifyLabelText(app: ColaApplication, ocrText: string, startTime
     detectedAbv = abvMatch[0].toUpperCase();
     const actualAbvVal = abvMatch[1];
     
-    if (actualAbvVal === expectedAbvVal) {
+    if (isStandaloneMonitoring) {
+      abvStatus = 'MATCH';
+      abvMsg = `Standalone Scan: Mandatory ABV statement detected ("${detectedAbv}").`;
+    } else if (actualAbvVal === expectedAbvVal) {
       abvStatus = 'MATCH';
       abvMsg = 'Alcohol content matches exactly.';
     } else {
-      // Check if it is within tolerances (e.g. for wine, TTB allows some variation, but we flag it)
       abvStatus = 'MISMATCH';
       abvMsg = `ABV mismatch. Application states ${app.abv}, but label shows ${detectedAbv}.`;
     }
+  } else if (isStandaloneMonitoring) {
+    abvStatus = 'MISMATCH';
+    abvMsg = 'Standalone Scan: Mandatory ABV % statement missing from label.';
   }
   
   const abvVerification: FieldVerification = {
     status: abvStatus,
-    expected: app.abv,
+    expected: app.abv || 'Mandatory ABV %',
     actual: detectedAbv,
     message: abvMsg
   };
@@ -162,10 +195,7 @@ export function verifyLabelText(app: ColaApplication, ocrText: string, startTime
   let volMsg = 'Net contents statement not found or incorrect.';
   let detectedVol = 'Not detected';
   
-  // Extract number and unit: e.g. "750 ml", "12 fl. oz.", "1.5 Liters"
-  const expectedVolClean = normalize(app.volume); // "750 ml" or "12 fl oz"
-  
-  // Standard volume patterns in alcohol labels
+  const expectedVolClean = normalize(app.volume);
   const volumeRegex = /(\d+(?:\.\d+)?)\s*(ml|l|liters|fl\s*oz|fl\s*\.\s*oz|fluid\s*ounces)/i;
   const volMatch = normOcrLower.match(volumeRegex);
   
@@ -173,7 +203,10 @@ export function verifyLabelText(app: ColaApplication, ocrText: string, startTime
     detectedVol = volMatch[0];
     const actualVolClean = normalize(detectedVol);
     
-    if (actualVolClean.replace(/\s+/g, '') === expectedVolClean.replace(/\s+/g, '')) {
+    if (isStandaloneMonitoring) {
+      volStatus = 'MATCH';
+      volMsg = `Standalone Scan: Mandatory net contents statement detected ("${detectedVol}").`;
+    } else if (actualVolClean.replace(/\s+/g, '') === expectedVolClean.replace(/\s+/g, '')) {
       volStatus = 'MATCH';
       volMsg = 'Net contents match exactly.';
     } else if (actualVolClean.includes(expectedVolClean) || expectedVolClean.includes(actualVolClean)) {
@@ -183,6 +216,9 @@ export function verifyLabelText(app: ColaApplication, ocrText: string, startTime
       volStatus = 'MISMATCH';
       volMsg = `Volume mismatch. Application states ${app.volume}, but label shows ${detectedVol}.`;
     }
+  } else if (isStandaloneMonitoring) {
+    volStatus = 'MISMATCH';
+    volMsg = 'Standalone Scan: Mandatory net contents statement missing from label.';
   }
   
   const volumeVerification: FieldVerification = {
