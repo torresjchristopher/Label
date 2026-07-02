@@ -9,8 +9,7 @@ import {
   Download, 
   Accessibility, 
   Volume2,
-  VolumeX,
-  X
+  VolumeX
 } from 'lucide-react';
 
 import { STANDARD_GOVERNMENT_WARNING } from './database';
@@ -187,7 +186,6 @@ export default function App() {
               if (roiCtx) {
                 roiCtx.drawImage(fullCanvas, cropX, cropY, cropW, cropH, 0, 0, cropW, cropH);
                 const dataUrl = roiCanvas.toDataURL('image/jpeg', 0.95);
-                
                 const { data: { text } } = await Tesseract.recognize(dataUrl, 'eng');
                 
                 if (text && text.trim().length > 5) {
@@ -946,26 +944,6 @@ export default function App() {
                       {cameraActive && (
                         <div style={{ width: '100%', height: '100%', position: 'absolute', inset: 0, overflow: 'hidden', background: '#000' }}>
                           <video ref={videoRef} className="camera-viewfinder" autoPlay playsInline muted></video>
-                          
-                          {/* Minimal Top Controls Bar */}
-                          <div style={{ position: 'absolute', top: '12px', right: '12px', zIndex: 10, display: 'flex', gap: '8px' }}>
-                            <button 
-                              type="button" 
-                              className={`access-control-btn ${soundEnabled ? 'active' : ''}`}
-                              onClick={() => setSoundEnabled(!soundEnabled)}
-                              style={{ background: 'rgba(0,0,0,0.7)', color: '#fff', padding: '6px 10px', borderRadius: '16px' }}
-                            >
-                              {soundEnabled ? <Volume2 size={15} /> : <VolumeX size={15} />}
-                            </button>
-                            <button 
-                              type="button" 
-                              className="btn btn-danger"
-                              onClick={stopCamera}
-                              style={{ padding: '6px 14px', borderRadius: '16px', fontSize: '0.82rem', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '4px' }}
-                            >
-                              <X size={14} /> Close Camera
-                            </button>
-                          </div>
 
                           {/* Reticle box overlay */}
                           <div className={`viewfinder-reticle ${liveScanResult ? (liveScanResult.overallPassed ? 'pass' : 'fail') : ''}`} style={{ left: '10%', top: '12%', width: '80%', height: '76%' }}>
