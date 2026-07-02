@@ -31,34 +31,62 @@ function fuzzyContains(haystack: string, needle: string): boolean {
   return matches / needleWords.length >= 0.75;
 }
 
+// Helper to build a regex that allows optional punctuation/spacing between words
+function getBrandRegex(brand: string): RegExp {
+  const words = brand.split(/[\s'’\-]+/).filter(w => w.length > 0);
+  const pattern = words.map(w => w.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&')).join("[\\s'’\\-]*");
+  return new RegExp(pattern, 'i');
+}
+
 export function verifyLabelText(app: ColaApplication, ocrText: string, startTime: number): VerificationResult {
   const normOcrLower = ocrText.toLowerCase();
   
   // 1. BRAND NAME VERIFICATION
   let brandStatus: FieldVerification['status'] = 'MISMATCH';
   let brandMsg = 'Brand name not found on the label.';
+  let brandVerification: FieldVerification;
   
   const expectedBrand = app.brandName;
-  const ocrHasBrandExact = ocrText.includes(expectedBrand);
-  const ocrHasBrandLower = normOcrLower.includes(expectedBrand.toLowerCase());
+  const brandRegex = getBrandRegex(expectedBrand);
+  const brandMatch = ocrText.match(brandRegex);
   
-  if (ocrHasBrandExact) {
-    brandStatus = 'MATCH';
-    brandMsg = 'Brand name matches exactly.';
-  } else if (ocrHasBrandLower) {
-    brandStatus = 'PARTIAL';
-    brandMsg = 'Brand name matches, but casing differs (acceptable TTB discrepancy).';
+  if (brandMatch) {
+    const actualText = brandMatch[0];
+    if (actualText === expectedBrand) {
+      brandStatus = 'MATCH';
+      brandMsg = 'Brand name matches exactly.';
+    } else if (actualText.toLowerCase() === expectedBrand.toLowerCase()) {
+      brandStatus = 'MATCH';
+      brandMsg = 'Brand name matches (acceptable TTB casing discrepancy).';
+    } else {
+      brandStatus = 'MATCH';
+      brandMsg = 'Brand name matches (normalized casing and punctuation discrepancy).';
+    }
+    brandVerification = {
+      status: brandStatus,
+      expected: expectedBrand,
+      actual: actualText,
+      message: brandMsg
+    };
   } else if (fuzzyContains(ocrText, expectedBrand)) {
     brandStatus = 'PARTIAL';
     brandMsg = 'Brand name matches fuzzily. Please confirm visually.';
+    brandVerification = {
+      status: brandStatus,
+      expected: expectedBrand,
+      actual: 'Detected fuzzily',
+      message: brandMsg
+    };
+  } else {
+    brandStatus = 'MISMATCH';
+    brandMsg = 'Brand name not found on the label.';
+    brandVerification = {
+      status: brandStatus,
+      expected: expectedBrand,
+      actual: 'Not detected',
+      message: brandMsg
+    };
   }
-  
-  const brandVerification: FieldVerification = {
-    status: brandStatus,
-    expected: expectedBrand,
-    actual: ocrText.match(new RegExp(expectedBrand.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&'), 'i'))?.[0] || 'Not detected',
-    message: brandMsg
-  };
 
   // 2. CLASS/TYPE VERIFICATION
   let classStatus: FieldVerification['status'] = 'MISMATCH';

@@ -142,6 +142,12 @@ header {
   width: fit-content;
 }
 
+@media (max-width: 768px) {
+  .tabs-navigation {
+    display: none !important;
+  }
+}
+
 .tab-btn {
   background: transparent;
   border: none;
@@ -418,6 +424,29 @@ textarea.db-search-input {
 .viewfinder-reticle::after { top: 0; right: 0; border-width: 3px 3px 0 0; }
 .viewfinder-corners::before { bottom: 0; left: 0; border-width: 0 0 3px 3px; }
 .viewfinder-corners::after { bottom: 0; right: 0; border-width: 0 3px 3px 0; }
+
+/* Viewfinder reticle scanning status colors */
+.viewfinder-reticle.pass {
+  border-color: var(--color-success) !important;
+  box-shadow: 0 0 0 9999px rgba(0, 169, 28, 0.15) !important;
+}
+.viewfinder-reticle.pass::before,
+.viewfinder-reticle.pass::after,
+.viewfinder-reticle.pass .viewfinder-corners::before,
+.viewfinder-reticle.pass .viewfinder-corners::after {
+  border-color: var(--color-success) !important;
+}
+
+.viewfinder-reticle.fail {
+  border-color: var(--color-error) !important;
+  box-shadow: 0 0 0 9999px rgba(217, 56, 30, 0.15) !important;
+}
+.viewfinder-reticle.fail::before,
+.viewfinder-reticle.fail::after,
+.viewfinder-reticle.fail .viewfinder-corners::before,
+.viewfinder-reticle.fail .viewfinder-corners::after {
+  border-color: var(--color-error) !important;
+}
 
 .scanner-controls {
   position: absolute;
