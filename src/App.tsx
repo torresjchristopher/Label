@@ -186,8 +186,7 @@ export default function App() {
               
               if (roiCtx) {
                 roiCtx.drawImage(fullCanvas, cropX, cropY, cropW, cropH, 0, 0, cropW, cropH);
-                const processedCanvas = preprocessCanvasForOcr(roiCanvas);
-                const dataUrl = processedCanvas.toDataURL('image/jpeg', 0.9);
+                const dataUrl = roiCanvas.toDataURL('image/jpeg', 0.95);
                 
                 const { data: { text } } = await Tesseract.recognize(dataUrl, 'eng');
                 

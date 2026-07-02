@@ -62,7 +62,22 @@ export function verifyLabelText(app: ColaApplication, ocrText: string, startTime
     const validBrandLines = ocrText
       .split('\n')
       .map(l => l.trim().replace(/[^\w\s'’-]/g, '').trim())
-      .filter(l => l.length >= 3 && !l.toLowerCase().includes('warning') && !l.toLowerCase().includes('alc') && !l.toLowerCase().includes('vol') && !/^\d+$/.test(l));
+      .filter(l => {
+        const clean = l.toLowerCase();
+        return (
+          l.length >= 4 &&
+          /[a-zA-Z]{3,}/.test(l) &&
+          !clean.includes('warning') &&
+          !clean.includes('surgeon') &&
+          !clean.includes('government') &&
+          !clean.includes('alc') &&
+          !clean.includes('vol') &&
+          !clean.includes('proof') &&
+          !clean.includes('contains') &&
+          !clean.includes('bottled') &&
+          !/^\d+$/.test(l)
+        );
+      });
     const detectedBrand = validBrandLines[0] || '';
     if (detectedBrand) {
       brandStatus = 'MATCH';
