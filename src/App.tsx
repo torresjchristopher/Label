@@ -597,9 +597,42 @@ export default function App() {
         });
         finalOcrText = PRESET_OCR_TEXTS[presetKey];
       } else {
+        // Normalize uploaded high-res image canvas (max 1600px dimension) for optimal OCR clarity
+        const processedImageSrc = await new Promise<string>((resolve) => {
+          const img = new Image();
+          img.crossOrigin = 'anonymous';
+          img.onload = () => {
+            const canvas = document.createElement('canvas');
+            let width = img.width;
+            let height = img.height;
+            const maxDim = 1600;
+            if (width > maxDim || height > maxDim) {
+              if (width > height) {
+                height = Math.round((height * maxDim) / width);
+                width = maxDim;
+              } else {
+                width = Math.round((width * maxDim) / height);
+                height = maxDim;
+              }
+            }
+            canvas.width = width;
+            canvas.height = height;
+            const ctx = canvas.getContext('2d');
+            if (ctx) {
+              ctx.drawImage(img, 0, 0, width, height);
+              const processed = preprocessCanvasForOcr(canvas);
+              resolve(processed.toDataURL('image/jpeg', 0.95));
+            } else {
+              resolve(imageSrc);
+            }
+          };
+          img.onerror = () => resolve(imageSrc);
+          img.src = imageSrc;
+        });
+
         // Direct local client-side Tesseract OCR for custom files
         const { data: { text } } = await Tesseract.recognize(
-          imageSrc,
+          processedImageSrc,
           'eng',
           {
             logger: m => {
@@ -612,6 +645,7 @@ export default function App() {
             }
           }
         );
+        console.log("Uploaded File OCR Extracted Text:", text);
         finalOcrText = text;
       }
 
