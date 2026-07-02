@@ -14,7 +14,7 @@ import {
   HelpCircle
 } from 'lucide-react';
 
-import { MOCK_COLA_APPLICATIONS, POPULAR_PRODUCTS } from './database';
+import { MOCK_COLA_APPLICATIONS, POPULAR_PRODUCTS, STANDARD_GOVERNMENT_WARNING } from './database';
 import { verifyLabelText } from './utils/verification';
 import type { ColaApplication, VerificationResult } from './types';
 
@@ -62,9 +62,6 @@ export default function App() {
   const [formVolume, setFormVolume] = useState('750 mL');
   const [formProducer, setFormProducer] = useState('Old Tom Distillery Co, Frankfort, KY');
   const [formCountryOfOrigin, setFormCountryOfOrigin] = useState('United States');
-  const [formWarningText, setFormWarningText] = useState(
-    "GOVERNMENT WARNING: (1) According to the Surgeon General, women should not drink alcoholic beverages during pregnancy because of the risk of birth defects. (2) Consumption of alcoholic beverages impairs your ability to drive a car or operate machinery, and may cause health problems."
-  );
 
   // Active Label Image State
   const [labelImage, setLabelImage] = useState<string>('/old_tom_bourbon_label.jpg');
@@ -108,7 +105,6 @@ export default function App() {
       setFormVolume(app.volume);
       setFormProducer(app.producer);
       setFormCountryOfOrigin(app.countryOfOrigin);
-      setFormWarningText(app.warningStatement);
       setLabelImage(app.labelUrl || '');
       setVerificationResult(null);
       stopCamera();
@@ -147,7 +143,7 @@ export default function App() {
       volume: formVolume,
       producer: formProducer,
       countryOfOrigin: formCountryOfOrigin,
-      warningStatement: formWarningText,
+      warningStatement: STANDARD_GOVERNMENT_WARNING,
       status: 'PENDING',
       applicantName: 'Manual Review Applicant',
       submitDate: new Date().toISOString().split('T')[0]
@@ -347,7 +343,7 @@ export default function App() {
       <header>
         <div className="logo-section">
           <div>
-            <h1 className="logo-title">LabelGuard AI</h1>
+            <h1 className="logo-title">Label Guard</h1>
             <p style={{ opacity: 0.7, fontSize: '0.8rem', marginTop: '-2px' }}>TTB Compliance Engine</p>
           </div>
         </div>
@@ -386,7 +382,7 @@ export default function App() {
             }}
           >
             <FolderOpen size={18} />
-            <span>Verify Batch Ingest (Janet's Upload)</span>
+            <span>Verify Batch Ingest</span>
           </button>
         </div>
       </div>
@@ -488,16 +484,7 @@ export default function App() {
                         style={{ margin: 0 }}
                       />
                     </div>
-                    <div className="form-group full-width" style={{ gridColumn: 'span 2' }}>
-                      <label className="form-label">Surgeon General Warning Statement (Expected)</label>
-                      <textarea 
-                        rows={3} 
-                        className="db-search-input" 
-                        value={formWarningText} 
-                        onChange={e => setFormWarningText(e.target.value)}
-                        style={{ margin: 0, height: 'auto' }}
-                      />
-                    </div>
+                    {/* Expected warning warning check is performed internally */}
                   </div>
                 </div>
               </div>
@@ -585,7 +572,7 @@ export default function App() {
                 style={{ minWidth: '320px', fontSize: '1.25rem', boxShadow: '0 0 25px rgba(212,175,55,0.3)' }}
               >
                 <Sparkles size={24} />
-                <span>Verify TTB Compliance (Under 5s)</span>
+                <span>Verify TTB Compliance</span>
               </button>
             </div>
 
@@ -778,7 +765,7 @@ export default function App() {
             <div className="glass-card">
               <h2>Batch Compliance Intake</h2>
               <p className="opacity-50" style={{ marginBottom: '1.5rem', fontSize: '0.9rem' }}>
-                Janet's Seattle Office bulk pipeline tool. Processes 200+ labels simultaneously in under 5 seconds, running auto-verifications on all TTB parameters.
+                Bulk compliance processing pipeline. Processes 200+ labels simultaneously, running auto-verifications on all TTB parameters.
               </p>
 
               <div className="batch-stats-grid" style={{ marginBottom: '1.5rem' }}>

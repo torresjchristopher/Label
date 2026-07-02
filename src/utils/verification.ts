@@ -349,6 +349,68 @@ export function verifyLabelText(app: ColaApplication, ocrText: string, startTime
     diffWords
   };
 
+  // 7.5 ADDITIONAL TTB COMPLIANCE CHECKS
+  const additionalChecks: Array<{ name: string; status: 'PASS' | 'WARNING' | 'INFO'; message: string }> = [];
+  
+  // A. Sulfite Declaration Check (For Wine)
+  if (app.classType.toLowerCase().includes('wine')) {
+    const hasSulfiteKeywords = normOcrLower.includes('sulfite') || normOcrLower.includes('sulphite');
+    if (hasSulfiteKeywords) {
+      additionalChecks.push({
+        name: 'Sulfite Declaration',
+        status: 'PASS',
+        message: 'Contains Sulfites declaration detected on the wine label.'
+      });
+    } else {
+      additionalChecks.push({
+        name: 'Sulfite Declaration',
+        status: 'WARNING',
+        message: 'TTB Compliance Notice: Wine labels require a sulfite declaration (e.g., "Contains Sulfites") if sulfur dioxide is 10 ppm or more.'
+      });
+    }
+  }
+
+  // B. Importer Designation Check (For Imports)
+  if (app.countryOfOrigin.toLowerCase() !== 'united states' && app.countryOfOrigin.toLowerCase() !== 'usa') {
+    const hasImporterKeywords = normOcrLower.includes('imported by') || 
+                                normOcrLower.includes('sole agent') || 
+                                normOcrLower.includes('importer');
+    if (hasImporterKeywords) {
+      additionalChecks.push({
+        name: 'Importer Prefix Designation',
+        status: 'PASS',
+        message: 'Importer prefix ("Imported by" or equivalent) detected on label.'
+      });
+    } else {
+      additionalChecks.push({
+        name: 'Importer Prefix Designation',
+        status: 'WARNING',
+        message: 'TTB Compliance Warning: Imported labels must designate the importer with a prefix (e.g., "Imported by" or "Sole Agent").'
+      });
+    }
+  }
+
+  // C. Distilled Spirits State of Distillation (For Whiskies)
+  if (app.classType.toLowerCase().includes('whiskey') || app.classType.toLowerCase().includes('whisky')) {
+    const hasStateOfDist = normOcrLower.includes('distilled in') || 
+                           normOcrLower.includes('product of') ||
+                           normOcrLower.includes('kentucky') ||
+                           normOcrLower.includes('tennessee');
+    if (hasStateOfDist) {
+      additionalChecks.push({
+        name: 'State of Distillation',
+        status: 'PASS',
+        message: 'Distillation region or origin statement detected.'
+      });
+    } else {
+      additionalChecks.push({
+        name: 'State of Distillation',
+        status: 'INFO',
+        message: 'TTB Guideline: Straight whiskies must disclose the state of distillation on the label.'
+      });
+    }
+  }
+
   // 8. OVERALL PASSED DECISION
   const overallPassed = 
     brandVerification.status !== 'MISMATCH' &&
@@ -371,6 +433,7 @@ export function verifyLabelText(app: ColaApplication, ocrText: string, startTime
     countryOfOrigin: originVerification,
     overallPassed,
     ocrRawText: ocrText,
-    processingTimeMs
+    processingTimeMs,
+    additionalChecks
   };
 }

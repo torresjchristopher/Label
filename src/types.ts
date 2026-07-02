@@ -44,6 +44,12 @@ export interface WarningVerification {
   diffWords?: Array<{ word: string; status: 'match' | 'missing' | 'added' | 'casing_error' }>;
 }
 
+export interface AdditionalCheck {
+  name: string;
+  status: 'PASS' | 'WARNING' | 'INFO';
+  message: string;
+}
+
 export interface VerificationResult {
   brandName: FieldVerification;
   classType: FieldVerification;
@@ -55,4 +61,5 @@ export interface VerificationResult {
   overallPassed: boolean;
   ocrRawText: string;
   processingTimeMs: number;
+  additionalChecks: AdditionalCheck[];
 }
