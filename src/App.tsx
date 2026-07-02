@@ -8,7 +8,6 @@ import {
   Play, 
   Download, 
   Accessibility, 
-  HelpCircle,
   Volume2,
   VolumeX
 } from 'lucide-react';
@@ -75,7 +74,6 @@ export default function App() {
   const [isScanning, setIsScanning] = useState(false);
   const [scanProgress, setScanProgress] = useState(0);
   const [scanProgressText, setScanProgressText] = useState('');
-  const [showRawOcr, setShowRawOcr] = useState(false);
 
   // Mobile Camera States
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -718,7 +716,7 @@ export default function App() {
                 </div>
                 <div className="panel-body">
                   <div className="form-vertical-stack">
-                    <div className="form-group">
+                    <div className="form-group-horizontal">
                       <label className="form-label">Brand Name</label>
                       <input 
                         type="text" 
@@ -728,7 +726,7 @@ export default function App() {
                         style={{ margin: 0 }}
                       />
                     </div>
-                    <div className="form-group">
+                    <div className="form-group-horizontal">
                       <label className="form-label">Class & Type Designation</label>
                       <input 
                         type="text" 
@@ -738,7 +736,7 @@ export default function App() {
                         style={{ margin: 0 }}
                       />
                     </div>
-                    <div className="form-group">
+                    <div className="form-group-horizontal">
                       <label className="form-label">Alcohol Content (ABV %)</label>
                       <input 
                         type="text" 
@@ -748,7 +746,7 @@ export default function App() {
                         style={{ margin: 0 }}
                       />
                     </div>
-                    <div className="form-group">
+                    <div className="form-group-horizontal">
                       <label className="form-label">Net Contents</label>
                       <input 
                         type="text" 
@@ -758,7 +756,7 @@ export default function App() {
                         style={{ margin: 0 }}
                       />
                     </div>
-                    <div className="form-group">
+                    <div className="form-group-horizontal">
                       <label className="form-label">Bottler / Producer</label>
                       <input 
                         type="text" 
@@ -768,7 +766,7 @@ export default function App() {
                         style={{ margin: 0 }}
                       />
                     </div>
-                    <div className="form-group">
+                    <div className="form-group-horizontal">
                       <label className="form-label">Country of Origin</label>
                       <input 
                         type="text" 
@@ -937,21 +935,20 @@ export default function App() {
                   </div>
                 </div>
               )}
-
             </div>
 
-            {/* VERIFICATION REPORT ACCORDION CONTAINER */}
+            {/* VERIFICATION REPORT & BATCH DASHBOARD */}
             <div className="verification-results-panel">
               <div className="results-header">
                 <div className="flex-row align-center">
-                  <ShieldCheck size={24} style={{ color: verificationResult ? (verificationResult.overallPassed ? 'var(--color-success)' : 'var(--color-error)') : 'var(--text-muted)' }} />
+                  <ShieldCheck size={24} style={{ color: verificationResult ? (verificationResult.overallPassed ? 'var(--color-success)' : 'var(--color-error)') : 'var(--accent-gold)' }} />
                   <div>
-                    <h3 style={{ fontSize: '1.25rem' }}>AI Verification Compliance Checklist</h3>
-                    <p className="opacity-50" style={{ fontSize: '0.8rem' }}>
-                      {verificationResult 
-                        ? `Compliance report compiled locally in ${verificationResult.processingTimeMs}ms`
-                        : 'Submit fields and label above to generate compliance report.'}
-                    </p>
+                    <h3 style={{ fontSize: '1.25rem' }}>AI Verification & Batch Compliance Dashboard</h3>
+                    {verificationResult && (
+                      <p className="opacity-50" style={{ fontSize: '0.8rem' }}>
+                        Compliance report compiled locally in {verificationResult.processingTimeMs}ms
+                      </p>
+                    )}
                   </div>
                 </div>
                 {verificationResult && (
@@ -971,8 +968,9 @@ export default function App() {
                 )}
               </div>
 
-              {verificationResult ? (
-                <div>
+              {/* Single Checklist Report */}
+              {verificationResult && (
+                <div style={{ marginBottom: '2rem' }}>
                   <div className="results-grid">
                     
                     {/* Brand Name row */}
@@ -1093,109 +1091,61 @@ export default function App() {
                     ))}
                   </div>
 
-                  {/* Warning Highlight Box */}
-                  <div className="warning-verification-box">
-                    <span className="form-label" style={{ color: 'var(--accent-gold)' }}>Word-by-Word Conformity Analysis</span>
-                    <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginBottom: '8px' }}>
-                      Visual key: <span className="diff-word match" style={{ border: '1px solid rgba(255,255,255,0.1)', fontSize: '0.75rem' }}>Passed</span>
-                      <span className="diff-word casing_error" style={{ fontSize: '0.75rem' }}>Header Casing Error</span>
-                      <span className="diff-word missing" style={{ fontSize: '0.75rem' }}>Missing Text</span>
-                      <span className="diff-word added" style={{ fontSize: '0.75rem' }}>Extra Added Text</span>
-                    </p>
-
-                    <div className="warning-diff-text">
-                      {verificationResult.warningStatement.diffWords && verificationResult.warningStatement.diffWords.map((wd, index) => (
-                        <span key={index} className={`diff-word ${wd.status}`}>
-                          {wd.word}
-                        </span>
-                      ))}
-                    </div>
-
-                    {/* Error lists */}
-                    {verificationResult.warningStatement.errors.length > 0 && (
-                      <div style={{ marginTop: '1rem' }}>
-                        <span className="form-label" style={{ color: 'var(--color-error)' }}>Flagged Warning Statements:</span>
-                        <ul className="warning-errors-list">
-                          {verificationResult.warningStatement.errors.map((err, idx) => (
-                            <li key={idx} className="warning-error-item">{err}</li>
-                          ))}
-                        </ul>
-                      </div>
-                    )}
-
-                    {/* Component failure recording action for live/single scans */}
-                    {!verificationResult.overallPassed && (
-                      <div style={{ marginTop: '1.25rem', padding: '1rem 1.25rem', background: 'var(--color-error-bg)', border: '1px solid var(--color-error-border)', borderRadius: '4px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.75rem' }}>
-                        <div>
-                          <div style={{ color: 'var(--color-error)', fontSize: '0.95rem', fontWeight: 700 }}>
-                            ⚠️ Failure Detected ({verificationResult.complianceScore}% Compliance Score)
-                          </div>
-                          <p style={{ fontSize: '0.8rem', opacity: 0.85, marginTop: '2px' }}>
-                            Scans do not auto-save to history unless manually logged. Click button to record component failure into the audit report dashboard.
-                          </p>
+                  {/* Component failure recording action for live/single scans */}
+                  {!verificationResult.overallPassed && (
+                    <div style={{ marginTop: '1.25rem', padding: '1rem 1.25rem', background: 'var(--color-error-bg)', border: '1px solid var(--color-error-border)', borderRadius: '4px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.75rem' }}>
+                      <div>
+                        <div style={{ color: 'var(--color-error)', fontSize: '0.95rem', fontWeight: 700 }}>
+                          ⚠️ Failure Detected ({verificationResult.complianceScore}% Compliance Score)
                         </div>
-                        <button 
-                          type="button" 
-                          className="btn btn-danger"
-                          onClick={() => {
-                            accumulateVerificationReport(verificationResult);
-                          }}
-                          style={{ fontSize: '0.85rem', padding: '8px 16px', display: 'flex', alignItems: 'center', gap: '0.4rem' }}
-                        >
-                          <span>+ Record Failure to Dashboard</span>
-                        </button>
+                        <p style={{ fontSize: '0.8rem', opacity: 0.85, marginTop: '2px' }}>
+                          Scans do not auto-save to history unless manually logged. Click button to record component failure into the audit report dashboard.
+                        </p>
                       </div>
-                    )}
-
-                  </div>
-
-                  {/* Raw OCR logs */}
-                  <div style={{ marginTop: '1rem' }}>
-                    <button className="btn-link" style={{ fontSize: '0.8rem' }} onClick={() => setShowRawOcr(!showRawOcr)}>
-                      {showRawOcr ? 'Hide raw extracted OCR text' : 'Show raw extracted OCR text'}
-                    </button>
-                    {showRawOcr && (
-                      <pre style={{ background: '#000', padding: '1rem', borderRadius: '8px', border: '1px solid var(--border-color)', fontSize: '0.75rem', marginTop: '0.5rem', fontFamily: 'var(--font-mono)', whiteSpace: 'pre-wrap' }}>
-                        {verificationResult.ocrRawText}
-                      </pre>
-                    )}
-                  </div>
-                </div>
-              ) : (
-                <div style={{ padding: '2rem 0', textAlign: 'center', color: 'var(--text-muted)' }}>
-                  <HelpCircle size={40} style={{ margin: '0 auto 10px auto', display: 'block' }} />
-                  <p>No compliance scan run yet. Fill application fields, select/capture a label image, and click "Verify TTB Compliance" above.</p>
+                      <button 
+                        type="button" 
+                        className="btn btn-danger"
+                        onClick={() => {
+                          accumulateVerificationReport(verificationResult);
+                        }}
+                        style={{ fontSize: '0.85rem', padding: '8px 16px', display: 'flex', alignItems: 'center', gap: '0.4rem' }}
+                      >
+                        <span>+ Record Failure to Dashboard</span>
+                      </button>
+                    </div>
+                  )}
                 </div>
               )}
-            </div>
 
-            {/* ACCUMULATED AUDIT LOG (Janet's Seattle Request / Mobile Single Page Batch) */}
-            {(batchList.length > 0 || isProcessingBatch) && (
-              <div className="glass-card" style={{ marginTop: '1rem' }}>
+              {/* BATCH VERIFICATION DASHBOARD COMPONENT */}
+              <div style={{ marginTop: '1.5rem', paddingTop: '1.5rem', borderTop: '1px solid var(--border-color)' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem', flexWrap: 'wrap', gap: '0.5rem' }}>
                   <div>
-                    <h3 style={{ fontSize: '1.25rem' }}>Product Verification History & Stats</h3>
+                    <h4 style={{ fontSize: '1.1rem', color: 'var(--accent-gold)' }}>Batch & Intake Verification Summary</h4>
                     <p className="opacity-50" style={{ fontSize: '0.8rem' }}>
-                      Accumulated audit logs for the current product brand. Resets when product info changes.
+                      Audit log records for current product intake. Resets when product info is edited or new intake is uploaded.
                     </p>
                   </div>
-                  <button 
-                    type="button"
-                    className="btn btn-secondary" 
-                    onClick={() => {
-                      setBatchList([]);
-                      setBatchStats({ approved: 0, rejected: 0, flagged: 0 });
-                      setBatchSize(0);
-                      setBatchProcessed(0);
-                      setBatchLog([]);
-                    }}
-                    disabled={isProcessingBatch}
-                    style={{ padding: '6px 12px', fontSize: '0.75rem' }}
-                  >
-                    Clear History
-                  </button>
+                  {batchList.length > 0 && (
+                    <button 
+                      type="button"
+                      className="btn btn-secondary" 
+                      onClick={() => {
+                        setBatchList([]);
+                        setBatchStats({ approved: 0, rejected: 0, flagged: 0 });
+                        setBatchSize(0);
+                        setBatchProcessed(0);
+                        setBatchLog([]);
+                      }}
+                      disabled={isProcessingBatch}
+                      style={{ padding: '6px 12px', fontSize: '0.75rem' }}
+                    >
+                      Clear Intake Log
+                    </button>
+                  )}
                 </div>
 
+                {/* Dashboard Stats Grid */}
                 <div className="batch-stats-grid" style={{ marginBottom: '1.5rem' }}>
                   <div className="batch-stat-card">
                     <span className="form-label">Total Ingested</span>
@@ -1227,14 +1177,16 @@ export default function App() {
                   </div>
                 )}
 
+                {/* Live Pipeline log terminal & Table */}
                 <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1.5fr', gap: '1.25rem' }}>
-                  {/* Logs */}
+                  
+                  {/* Terminal Logs */}
                   <div className="batch-log-panel">
                     <div className="batch-log-header">Pipeline System Logs</div>
                     <div className="batch-log-list">
                       {batchLog.length === 0 ? (
                         <div style={{ color: 'var(--text-muted)', textAlign: 'center', paddingTop: '4rem' }}>
-                          Console ready.
+                          Console ready. Initiate intake or batch run to display live logs.
                         </div>
                       ) : (
                         batchLog.map((log, idx) => (
@@ -1247,7 +1199,7 @@ export default function App() {
                     </div>
                   </div>
 
-                  {/* List */}
+                  {/* Verified results list */}
                   <div className="batch-log-panel" style={{ height: 'auto', maxHeight: '550px' }}>
                     <div className="batch-log-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                       <span>Verified Applications Report</span>
@@ -1260,7 +1212,7 @@ export default function App() {
                     
                     {batchList.length > 0 && (
                       <>
-                        {/* Non-Compliant Alert Box */}
+                        {/* Non-Compliant Alert Box listing all non-compliant IDs */}
                         {batchList.filter(item => item.result !== 'Approved (Auto)').length > 0 && (
                           <div className="batch-noncompliant-alert">
                             <strong>⚠️ Non-Compliant Uploads Flagged:</strong>
@@ -1273,7 +1225,7 @@ export default function App() {
                         {/* Filter bar */}
                         <div className="batch-filter-bar">
                           <button type="button" className={`batch-filter-btn ${batchFilter === 'all' ? 'active' : ''}`} onClick={() => setBatchFilter('all')}>
-                            All ({batchList.length})
+                            All Uploads ({batchList.length})
                           </button>
                           <button type="button" className={`batch-filter-btn ${batchFilter === 'non-compliant' ? 'active' : ''}`} onClick={() => setBatchFilter('non-compliant')} style={{ color: 'var(--color-error)' }}>
                             Non-Compliant ({batchList.filter(item => item.result !== 'Approved (Auto)').length})
@@ -1288,7 +1240,7 @@ export default function App() {
                     <div className="batch-log-list" style={{ fontFamily: 'var(--font-sans)', fontSize: '0.85rem' }}>
                       {batchList.length === 0 ? (
                         <div style={{ color: 'var(--text-muted)', textAlign: 'center', paddingTop: '4rem' }}>
-                          Report waiting.
+                          Report waiting. Intake results will populate here.
                         </div>
                       ) : (
                         <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
@@ -1318,10 +1270,10 @@ export default function App() {
                       )}
                     </div>
                   </div>
+
                 </div>
               </div>
-            )}
-
+            </div>
           </div>
         </main>
       </div>
