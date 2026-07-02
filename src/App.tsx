@@ -706,7 +706,7 @@ export default function App() {
         <div style={{ maxWidth: '1200px', margin: '0 auto', display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
           
           {/* Split Form and Artwork Workspace */}
-          <div className="split-workspace" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1.5rem' }}>
+          <div className="split-workspace">
             
             {/* Form Input panel */}
             {(!isMobile || mobileStep === 'info') && (

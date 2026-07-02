@@ -185,6 +185,20 @@ header {
   margin-bottom: 1.5rem;
 }
 
+.split-workspace {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1.5rem;
+  width: 100%;
+}
+
+@media (max-width: 768px) {
+  .split-workspace {
+    grid-template-columns: 1fr !important;
+    gap: 1rem;
+  }
+}
+
 .workspace-panel {
   display: flex;
   flex-direction: column;
@@ -194,6 +208,7 @@ header {
   border-radius: 4px;
   overflow: hidden;
   box-shadow: var(--shadow-subtle);
+  width: 100%;
 }
 
 .panel-header {
