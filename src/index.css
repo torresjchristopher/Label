@@ -323,6 +323,29 @@ textarea.db-search-input {
   font-size: 1.05rem;
 }
 
+.btn-save-info {
+  background-color: var(--bg-tertiary);
+  border: 1px solid var(--border-color);
+  color: var(--text-primary);
+  font-weight: 600;
+  transition: var(--transition-smooth);
+}
+
+.btn-save-info.disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  background-color: var(--bg-tertiary) !important;
+  color: var(--text-muted) !important;
+  border-color: var(--border-color) !important;
+}
+
+.btn-save-info.eligible:hover {
+  background-color: #00a91c !important;
+  border-color: #00a91c !important;
+  color: #ffffff !important;
+  box-shadow: 0 0 15px rgba(0, 169, 28, 0.4);
+}
+
 /* Image / Viewfinder */
 .image-viewer-container {
   background-color: #f0f0f0;

@@ -8,8 +8,6 @@ import {
   Play, 
   Download, 
   Accessibility, 
-  RefreshCw,
-  FileCheck,
   HelpCircle,
   Volume2,
   VolumeX
@@ -54,8 +52,7 @@ const PRESET_OCR_TEXTS: Record<string, string> = {
 };
 
 export default function App() {
-  // Navigation & UI Configuration
-  const [activeTab, setActiveTab] = useState<'single' | 'batch'>('single');
+  // UI Configuration
   const [largeTextMode, setLargeTextMode] = useState(false);
   
   // Product Registry - Not used since no 'existing' tab
@@ -91,7 +88,6 @@ export default function App() {
   const [batchLog, setBatchLog] = useState<{ time: string; msg: string }[]>([]);
   const [isProcessingBatch, setIsProcessingBatch] = useState(false);
   const [batchList, setBatchList] = useState<Array<{ id: number; brand: string; result: string; errors: string[] }>>([]);
-  const [batchProcessingSpeed, setBatchProcessingSpeed] = useState<number>(0);
   const [batchFilter, setBatchFilter] = useState<'all' | 'non-compliant' | 'compliant'>('all');
 
   // Mobile viewport detection
@@ -295,7 +291,6 @@ export default function App() {
         setIsProcessingBatch(false);
         const endTime = Date.now();
         const duration = (endTime - startTime) / 1000;
-        setBatchProcessingSpeed(Math.round((size / duration) * 10) / 10);
         
         setBatchLog(prev => [
           { time: new Date().toLocaleTimeString(), msg: `🎉 Batch of ${size} completed in ${duration.toFixed(2)} seconds. Average speed: ${(duration * 1000 / size).toFixed(1)}ms per label.` },
@@ -656,13 +651,22 @@ export default function App() {
     }
   };
 
-  // Batch Processing Pipeline Simulation (Janet's Seattle Request)
-  const triggerBatchProcess = () => {
-    if (batchSize === 0) {
-      alert('Please upload a batch of labels first.');
-      return;
-    }
-    runBatchSimulation(batchSize);
+  const isFormComplete = Boolean(
+    formBrandName.trim() &&
+    formClassType.trim() &&
+    formAbv.trim() &&
+    formVolume.trim() &&
+    formProducer.trim() &&
+    formCountryOfOrigin.trim()
+  );
+
+  const resetDashboard = () => {
+    setVerificationResult(null);
+    setBatchList([]);
+    setBatchStats({ approved: 0, rejected: 0, flagged: 0 });
+    setBatchSize(0);
+    setBatchProcessed(0);
+    setBatchLog([]);
   };
 
   return (
@@ -699,149 +703,121 @@ export default function App() {
         </div>
       </header>
 
-      {/* Main Tab Navigation */}
-      <div style={{ padding: '1rem 1.5rem 0 1.5rem' }}>
-        <div className="tabs-navigation" style={{ maxWidth: '800px', margin: '0 auto' }}>
-          <button 
-            className={`tab-btn ${activeTab === 'single' ? 'active' : ''}`} 
-            onClick={() => {
-              setActiveTab('single');
-              stopCamera();
-            }}
-          >
-            <FileCheck size={18} />
-            <span>Verify Single Label</span>
-          </button>
-          
-          <button 
-            className={`tab-btn ${activeTab === 'batch' ? 'active' : ''}`} 
-            onClick={() => {
-              setActiveTab('batch');
-              stopCamera();
-            }}
-          >
-            <Play size={18} />
-            <span>Verify Batch</span>
-          </button>
-        </div>
-      </div>
-
       {/* Main Content Area */}
       <main style={{ padding: '1.5rem', flexGrow: 1, overflowY: 'auto' }}>
-        
-        {activeTab === 'single' && (
-          <div style={{ maxWidth: '1200px', margin: '0 auto', display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+        <div style={{ maxWidth: '1200px', margin: '0 auto', display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+          
+          {/* Split Form and Artwork Workspace */}
+          <div className="split-workspace" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1.5rem' }}>
             
-            {/* Split Form and Artwork Workspace */}
-            <div className="split-workspace" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1.5rem' }}>
-              
-              {/* Form Input panel */}
-              {(!isMobile || mobileStep === 'info') && (
-                <div className="workspace-panel">
-                  <div className="panel-header">
-                    <h4>Application Form Fields</h4>
-                  </div>
-                  <div className="panel-body">
-                    {/* Pre-fill Config Actions */}
-                    <div style={{ display: 'flex', gap: '0.75rem', marginBottom: '1.25rem' }}>
-                      <button 
-                        type="button"
-                        className="btn" 
-                        onClick={handleExportPrefill}
-                        style={{ flexGrow: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem', fontSize: '0.85rem' }}
-                        title="Save current product details to a text file for quick reloading later"
-                      >
-                        <Download size={14} />
-                        <span>Save Info File</span>
-                      </button>
-                      <label 
-                        className="btn" 
-                        style={{ flexGrow: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem', fontSize: '0.85rem', cursor: 'pointer', margin: 0 }}
-                        title="Upload a saved product info text file to pre-fill the form"
-                      >
-                        <UploadCloud size={14} />
-                        <span>Load Info File</span>
-                        <input type="file" accept=".txt" onChange={handleImportPrefill} style={{ display: 'none' }} />
-                      </label>
-                    </div>
-
-                    <div className="form-vertical-stack">
-                      <div className="form-group">
-                        <label className="form-label">Brand Name</label>
-                        <input 
-                          type="text" 
-                          className="db-search-input" 
-                          value={formBrandName} 
-                          onChange={e => setFormBrandName(e.target.value)} 
-                          style={{ margin: 0 }}
-                        />
-                      </div>
-                      <div className="form-group">
-                        <label className="form-label">Class & Type Designation</label>
-                        <input 
-                          type="text" 
-                          className="db-search-input" 
-                          value={formClassType} 
-                          onChange={e => setFormClassType(e.target.value)}
-                          style={{ margin: 0 }}
-                        />
-                      </div>
-                      <div className="form-group">
-                        <label className="form-label">Alcohol Content (ABV %)</label>
-                        <input 
-                          type="text" 
-                          className="db-search-input" 
-                          value={formAbv} 
-                          onChange={e => setFormAbv(e.target.value)}
-                          style={{ margin: 0 }}
-                        />
-                      </div>
-                      <div className="form-group">
-                        <label className="form-label">Net Contents</label>
-                        <input 
-                          type="text" 
-                          className="db-search-input" 
-                          value={formVolume} 
-                          onChange={e => setFormVolume(e.target.value)}
-                          style={{ margin: 0 }}
-                        />
-                      </div>
-                      <div className="form-group">
-                        <label className="form-label">Bottler / Producer</label>
-                        <input 
-                          type="text" 
-                          className="db-search-input" 
-                          value={formProducer} 
-                          onChange={e => setFormProducer(e.target.value)}
-                          style={{ margin: 0 }}
-                        />
-                      </div>
-                      <div className="form-group">
-                        <label className="form-label">Country of Origin</label>
-                        <input 
-                          type="text" 
-                          className="db-search-input" 
-                          value={formCountryOfOrigin} 
-                          onChange={e => setFormCountryOfOrigin(e.target.value)}
-                          style={{ margin: 0 }}
-                        />
-                      </div>
-                    </div>
-
-                    {isMobile && (
-                      <button 
-                        type="button"
-                        className="btn btn-primary btn-large w-full"
-                        style={{ marginTop: '1.5rem', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem' }}
-                        onClick={() => setMobileStep('scan')}
-                      >
-                        <span>Proceed to Scan/Upload</span>
-                        <Play size={16} />
-                      </button>
-                    )}
-                  </div>
+            {/* Form Input panel */}
+            {(!isMobile || mobileStep === 'info') && (
+              <div className="workspace-panel">
+                <div className="panel-header">
+                  <h4>Application Form Fields</h4>
                 </div>
-              )}
+                <div className="panel-body">
+                  <div className="form-vertical-stack">
+                    <div className="form-group">
+                      <label className="form-label">Brand Name</label>
+                      <input 
+                        type="text" 
+                        className="db-search-input" 
+                        value={formBrandName} 
+                        onChange={e => { setFormBrandName(e.target.value); resetDashboard(); }} 
+                        style={{ margin: 0 }}
+                      />
+                    </div>
+                    <div className="form-group">
+                      <label className="form-label">Class & Type Designation</label>
+                      <input 
+                        type="text" 
+                        className="db-search-input" 
+                        value={formClassType} 
+                        onChange={e => { setFormClassType(e.target.value); resetDashboard(); }}
+                        style={{ margin: 0 }}
+                      />
+                    </div>
+                    <div className="form-group">
+                      <label className="form-label">Alcohol Content (ABV %)</label>
+                      <input 
+                        type="text" 
+                        className="db-search-input" 
+                        value={formAbv} 
+                        onChange={e => { setFormAbv(e.target.value); resetDashboard(); }}
+                        style={{ margin: 0 }}
+                      />
+                    </div>
+                    <div className="form-group">
+                      <label className="form-label">Net Contents</label>
+                      <input 
+                        type="text" 
+                        className="db-search-input" 
+                        value={formVolume} 
+                        onChange={e => { setFormVolume(e.target.value); resetDashboard(); }}
+                        style={{ margin: 0 }}
+                      />
+                    </div>
+                    <div className="form-group">
+                      <label className="form-label">Bottler / Producer</label>
+                      <input 
+                        type="text" 
+                        className="db-search-input" 
+                        value={formProducer} 
+                        onChange={e => { setFormProducer(e.target.value); resetDashboard(); }}
+                        style={{ margin: 0 }}
+                      />
+                    </div>
+                    <div className="form-group">
+                      <label className="form-label">Country of Origin</label>
+                      <input 
+                        type="text" 
+                        className="db-search-input" 
+                        value={formCountryOfOrigin} 
+                        onChange={e => { setFormCountryOfOrigin(e.target.value); resetDashboard(); }}
+                        style={{ margin: 0 }}
+                      />
+                    </div>
+                  </div>
+
+                  {/* Pre-fill Config Actions (Moved directly below input fields) */}
+                  <div style={{ display: 'flex', gap: '0.75rem', marginTop: '1.25rem', paddingTop: '1rem', borderTop: '1px solid var(--border-color)' }}>
+                    <button 
+                      type="button"
+                      className={`btn btn-save-info ${isFormComplete ? 'eligible' : 'disabled'}`}
+                      onClick={handleExportPrefill}
+                      disabled={!isFormComplete}
+                      style={{ flexGrow: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem', fontSize: '0.85rem' }}
+                      title={isFormComplete ? "Save current product details to a text file for quick pre-filling" : "Fill all product fields above to enable saving"}
+                    >
+                      <Download size={14} />
+                      <span>Save Info File</span>
+                    </button>
+                    <label 
+                      className="btn" 
+                      style={{ flexGrow: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem', fontSize: '0.85rem', cursor: 'pointer', margin: 0, background: 'var(--bg-tertiary)', border: '1px solid var(--border-color)' }}
+                      title="Upload a saved product info text file (.txt) to pre-fill the form"
+                    >
+                      <UploadCloud size={14} />
+                      <span>Load Info File</span>
+                      <input type="file" accept=".txt" onChange={handleImportPrefill} style={{ display: 'none' }} />
+                    </label>
+                  </div>
+
+                  {isMobile && (
+                    <button 
+                      type="button"
+                      className="btn btn-primary btn-large w-full"
+                      style={{ marginTop: '1.5rem', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem' }}
+                      onClick={() => setMobileStep('scan')}
+                    >
+                      <span>Proceed to Scan/Upload</span>
+                      <Play size={16} />
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
 
               {/* Label Artwork Panel */}
               {(!isMobile || mobileStep === 'scan') && (
@@ -1146,6 +1122,31 @@ export default function App() {
                         </ul>
                       </div>
                     )}
+
+                    {/* Component failure recording action for live/single scans */}
+                    {!verificationResult.overallPassed && (
+                      <div style={{ marginTop: '1.25rem', padding: '1rem 1.25rem', background: 'var(--color-error-bg)', border: '1px solid var(--color-error-border)', borderRadius: '4px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.75rem' }}>
+                        <div>
+                          <div style={{ color: 'var(--color-error)', fontSize: '0.95rem', fontWeight: 700 }}>
+                            ⚠️ Failure Detected ({verificationResult.complianceScore}% Compliance Score)
+                          </div>
+                          <p style={{ fontSize: '0.8rem', opacity: 0.85, marginTop: '2px' }}>
+                            Scans do not auto-save to history unless manually logged. Click button to record component failure into the audit report dashboard.
+                          </p>
+                        </div>
+                        <button 
+                          type="button" 
+                          className="btn btn-danger"
+                          onClick={() => {
+                            accumulateVerificationReport(verificationResult);
+                          }}
+                          style={{ fontSize: '0.85rem', padding: '8px 16px', display: 'flex', alignItems: 'center', gap: '0.4rem' }}
+                        >
+                          <span>+ Record Failure to Dashboard</span>
+                        </button>
+                      </div>
+                    )}
+
                   </div>
 
                   {/* Raw OCR logs */}
@@ -1322,190 +1323,7 @@ export default function App() {
             )}
 
           </div>
-        )}
-
-        {/* BATCH UPLOAD TAB */}
-        {activeTab === 'batch' && (
-          <div style={{ maxWidth: '1200px', margin: '0 auto', display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
-            <div className="glass-card">
-              <h2>Verify Batch</h2>
-              <p className="opacity-50" style={{ marginBottom: '1.5rem', fontSize: '0.9rem' }}>
-                Bulk compliance processing. Agents can upload batches of label images for automated TTB compliance verification.
-              </p>
-
-              <div className="batch-stats-grid" style={{ marginBottom: '1.5rem' }}>
-                <div className="batch-stat-card">
-                  <span className="form-label">Total Ingested</span>
-                  <div className="batch-stat-num" style={{ color: '#fff' }}>{batchSize}</div>
-                </div>
-                <div className="batch-stat-card">
-                  <span className="form-label">Compliant (Passed)</span>
-                  <div className="batch-stat-num" style={{ color: 'var(--color-success)' }}>{batchStats.approved}</div>
-                </div>
-                <div className="batch-stat-card">
-                  <span className="form-label">Flagged (Soft Warning)</span>
-                  <div className="batch-stat-num" style={{ color: 'var(--color-warning)' }}>{batchStats.flagged}</div>
-                </div>
-                <div className="batch-stat-card">
-                  <span className="form-label">Non-Compliant (Failed)</span>
-                  <div className="batch-stat-num" style={{ color: 'var(--color-error)' }}>{batchStats.rejected}</div>
-                </div>
-              </div>
-
-              {/* Progress indicator */}
-              {batchSize > 0 && (
-                <div style={{ marginBottom: '1.5rem' }}>
-                  <div className="batch-progress-bar-container">
-                    <div className="batch-progress-bar-fill" style={{ width: `${(batchProcessed / batchSize) * 100}%` }}></div>
-                    <span className="batch-progress-text">
-                      PROCESSED: {batchProcessed} / {batchSize} ({Math.round((batchProcessed / batchSize) * 100)}%)
-                    </span>
-                  </div>
-                  {batchProcessingSpeed > 0 && (
-                    <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', textAlign: 'right', marginTop: '5px' }}>
-                      Cluster Pipeline speed: <strong>{batchProcessingSpeed} labels/sec</strong>
-                    </p>
-                  )}
-                </div>
-              )}
-
-              {/* Drag Zone and Launch Button */}
-              <div className="flex-row justify-between align-center" style={{ gap: '1.5rem', flexWrap: 'wrap' }}>
-                <div className="upload-dropzone" style={{ flexGrow: 1, minWidth: '280px' }}>
-                  <UploadCloud size={32} className="upload-icon" />
-                  <div>
-                    <strong>Drag and drop importer's batch zip folder</strong>
-                    <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Supports ZIP, PDF, CSV, JPEG (up to 500 files)</p>
-                  </div>
-                </div>
-                
-                <div className="flex-column" style={{ gap: '0.75rem', minWidth: '240px' }}>
-                  <button 
-                    className="btn btn-primary btn-large w-full"
-                    onClick={triggerBatchProcess}
-                    disabled={isProcessingBatch}
-                  >
-                    <Play size={20} />
-                    <span>Run Batch Compliance</span>
-                  </button>
-                  
-                  <button 
-                    className="btn w-full"
-                    onClick={() => {
-                      setBatchSize(0);
-                      setBatchProcessed(0);
-                      setBatchStats({ approved: 0, rejected: 0, flagged: 0 });
-                      setBatchLog([]);
-                      setBatchList([]);
-                    }}
-                    disabled={isProcessingBatch}
-                  >
-                    <RefreshCw size={16} />
-                    <span>Clear Intake</span>
-                  </button>
-                </div>
-              </div>
-            </div>
-
-            {/* Live Pipeline log terminal & Table */}
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1.5fr', gap: '1.25rem' }}>
-              
-              {/* Terminal Logs */}
-              <div className="batch-log-panel">
-                <div className="batch-log-header">Pipeline System Logs</div>
-                <div className="batch-log-list">
-                  {batchLog.length === 0 ? (
-                    <div style={{ color: 'var(--text-muted)', textAlign: 'center', paddingTop: '4rem' }}>
-                      Console ready. Initiate batch run to display live logs.
-                    </div>
-                  ) : (
-                    batchLog.map((log, idx) => (
-                      <div key={idx} className="batch-log-item">
-                        <span className="batch-log-time">[{log.time}]</span>
-                        <span className="batch-log-msg">{log.msg}</span>
-                      </div>
-                    ))
-                  )}
-                </div>
-              </div>
-
-              {/* Verified results list */}
-              <div className="batch-log-panel" style={{ height: 'auto', maxHeight: '550px' }}>
-                <div className="batch-log-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <span>Verified Applications Report</span>
-                  {batchList.length > 0 && (
-                    <button type="button" className="btn-link" style={{ fontSize: '0.75rem' }} onClick={handleExportCSV}>
-                      <Download size={12} /> Export CSV
-                    </button>
-                  )}
-                </div>
-                
-                {batchList.length > 0 && (
-                  <>
-                    {/* Non-Compliant Alert Box listing all non-compliant IDs */}
-                    {batchList.filter(item => item.result !== 'Approved (Auto)').length > 0 && (
-                      <div className="batch-noncompliant-alert">
-                        <strong>⚠️ Non-Compliant Uploads Flagged:</strong>
-                        <p style={{ marginTop: '0.25rem', fontFamily: 'var(--font-mono)', wordBreak: 'break-all' }}>
-                          {batchList.filter(item => item.result !== 'Approved (Auto)').map(item => `#${item.id}`).join(', ')}
-                        </p>
-                      </div>
-                    )}
-
-                    {/* Filter bar */}
-                    <div className="batch-filter-bar">
-                      <button className={`batch-filter-btn ${batchFilter === 'all' ? 'active' : ''}`} onClick={() => setBatchFilter('all')}>
-                        All Uploads ({batchList.length})
-                      </button>
-                      <button className={`batch-filter-btn ${batchFilter === 'non-compliant' ? 'active' : ''}`} onClick={() => setBatchFilter('non-compliant')} style={{ color: 'var(--color-error)' }}>
-                        Non-Compliant Only ({batchList.filter(item => item.result !== 'Approved (Auto)').length})
-                      </button>
-                      <button className={`batch-filter-btn ${batchFilter === 'compliant' ? 'active' : ''}`} onClick={() => setBatchFilter('compliant')} style={{ color: 'var(--color-success)' }}>
-                        Compliant Only ({batchList.filter(item => item.result === 'Approved (Auto)').length})
-                      </button>
-                    </div>
-                  </>
-                )}
-
-                <div className="batch-log-list" style={{ fontFamily: 'var(--font-sans)', fontSize: '0.85rem' }}>
-                  {batchList.length === 0 ? (
-                    <div style={{ color: 'var(--text-muted)', textAlign: 'center', paddingTop: '4rem' }}>
-                      Report waiting. Batch results will populate here.
-                    </div>
-                  ) : (
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-                      {batchList.filter(item => {
-                        if (batchFilter === 'compliant') return item.result === 'Approved (Auto)';
-                        if (batchFilter === 'non-compliant') return item.result !== 'Approved (Auto)';
-                        return true;
-                      }).map((item, idx) => (
-                        <div key={idx} style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.04)', padding: '0.5rem 0.75rem', borderRadius: '6px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                          <div>
-                            <span style={{ fontFamily: 'var(--font-mono)', fontSize: '0.75rem', color: 'var(--text-muted)' }}>#{item.id}</span>
-                            <strong style={{ marginLeft: '10px' }}>{item.brand}</strong>
-                            {item.errors.length > 0 && (
-                              <div style={{ color: 'var(--color-error)', fontSize: '0.75rem', marginTop: '2px' }}>
-                                ⚠️ {item.errors.join(', ')}
-                              </div>
-                            )}
-                          </div>
-                          <div>
-                            <span className={`badge badge-${item.result.toLowerCase().includes('approved') ? 'approved' : item.result.toLowerCase().includes('flagged') ? 'revision' : 'rejected'}`}>
-                              {item.result}
-                            </span>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              </div>
-
-            </div>
-          </div>
-        )}
-
-      </main>
-    </div>
-  );
-}
+        </main>
+      </div>
+    );
+  }
