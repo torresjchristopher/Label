@@ -163,66 +163,85 @@ export default function App() {
         if (videoRef.current && videoRef.current.readyState === 4) {
           setIsLiveScanningFrame(true);
           try {
-            const canvas = document.createElement('canvas');
-            canvas.width = videoRef.current.videoWidth || 1280;
-            canvas.height = videoRef.current.videoHeight || 720;
-            const ctx = canvas.getContext('2d');
-            if (ctx) {
-              ctx.drawImage(videoRef.current, 0, 0, canvas.width, canvas.height);
-              const processedCanvas = preprocessCanvasForOcr(canvas);
-              const dataUrl = processedCanvas.toDataURL('image/jpeg');
+            const fullCanvas = document.createElement('canvas');
+            const vWidth = videoRef.current.videoWidth || 1280;
+            const vHeight = videoRef.current.videoHeight || 720;
+            fullCanvas.width = vWidth;
+            fullCanvas.height = vHeight;
+            const fullCtx = fullCanvas.getContext('2d');
+            
+            if (fullCtx) {
+              fullCtx.drawImage(videoRef.current, 0, 0, vWidth, vHeight);
               
-              const { data: { text } } = await Tesseract.recognize(dataUrl, 'eng');
+              // Industrial Region-of-Interest (ROI) Crop inside Reticle Box (10% left, 12% top, 80% width, 76% height)
+              const cropX = Math.round(vWidth * 0.10);
+              const cropY = Math.round(vHeight * 0.12);
+              const cropW = Math.round(vWidth * 0.80);
+              const cropH = Math.round(vHeight * 0.76);
               
-              if (text && text.trim().length > 5) {
-                // Accumulate rolling history of last 4 camera video frames
-                ocrFrameHistoryRef.current.push(text);
-                if (ocrFrameHistoryRef.current.length > 4) {
-                  ocrFrameHistoryRef.current.shift();
-                }
-                const combinedOcrText = ocrFrameHistoryRef.current.join('\n');
-                console.log("Accumulated Live Camera OCR Text:", combinedOcrText);
-
-                const appConfig: ColaApplication = {
-                  id: 'custom-app',
-                  applicationNumber: 'COLA-CUSTOM-INPUT',
-                  brandName: formBrandName,
-                  classType: formClassType,
-                  abv: formAbv,
-                  volume: formVolume,
-                  producer: formProducer,
-                  countryOfOrigin: formCountryOfOrigin,
-                  warningStatement: STANDARD_GOVERNMENT_WARNING,
-                  status: 'PENDING',
-                  applicantName: 'Manual Review Applicant',
-                  submitDate: new Date().toISOString().split('T')[0]
-                };
+              const roiCanvas = document.createElement('canvas');
+              roiCanvas.width = cropW;
+              roiCanvas.height = cropH;
+              const roiCtx = roiCanvas.getContext('2d');
+              
+              if (roiCtx) {
+                roiCtx.drawImage(fullCanvas, cropX, cropY, cropW, cropH, 0, 0, cropW, cropH);
+                const processedCanvas = preprocessCanvasForOcr(roiCanvas);
+                const dataUrl = processedCanvas.toDataURL('image/jpeg', 0.9);
                 
-                const startTime = Date.now();
-                const report = verifyLabelText(appConfig, combinedOcrText, startTime);
-                setLiveScanResult(report);
-                setVerificationResult(report);
-                setLabelImage(dataUrl);
-
-                // Sound cue when pass/fail state transitions
-                const currentStatus = report.overallPassed ? 'PASS' : 'FAIL';
-                if (lastAudioStatusRef.current !== currentStatus) {
-                  lastAudioStatusRef.current = currentStatus;
-                  if (soundEnabled) {
-                    if (report.overallPassed) playPassTone();
-                    else playFailTone();
+                const { data: { text } } = await Tesseract.recognize(dataUrl, 'eng');
+                
+                if (text && text.trim().length > 5) {
+                  // Accumulate rolling history of last 4 cropped ROI video frames
+                  ocrFrameHistoryRef.current.push(text);
+                  if (ocrFrameHistoryRef.current.length > 4) {
+                    ocrFrameHistoryRef.current.shift();
                   }
-                  triggerHapticFeedback(report.overallPassed);
+                  const combinedOcrText = ocrFrameHistoryRef.current.join('\n');
+                  console.log("ROI Warehouse Industrial OCR Text:", combinedOcrText);
+
+                  const appConfig: ColaApplication = {
+                    id: 'custom-app',
+                    applicationNumber: 'COLA-CUSTOM-INPUT',
+                    brandName: formBrandName,
+                    classType: formClassType,
+                    abv: formAbv,
+                    volume: formVolume,
+                    producer: formProducer,
+                    countryOfOrigin: formCountryOfOrigin,
+                    warningStatement: STANDARD_GOVERNMENT_WARNING,
+                    status: 'PENDING',
+                    applicantName: 'Manual Review Applicant',
+                    submitDate: new Date().toISOString().split('T')[0]
+                  };
+                  
+                  const startTime = Date.now();
+                  const report = verifyLabelText(appConfig, combinedOcrText, startTime);
+                  setLiveScanResult(report);
+                  setVerificationResult(report);
+                  setLabelImage(dataUrl);
+
+                  // Sound cue & automated warehouse conveyor batch entry on state transition
+                  const currentStatus = report.overallPassed ? 'PASS' : 'FAIL';
+                  if (lastAudioStatusRef.current !== currentStatus) {
+                    lastAudioStatusRef.current = currentStatus;
+                    accumulateVerificationReport(report);
+                    if (soundEnabled) {
+                      if (report.overallPassed) playPassTone();
+                      else playFailTone();
+                    }
+                    triggerHapticFeedback(report.overallPassed);
+                  }
                 }
               }
             }
           } catch (err) {
-            console.error("Yuka live frame scan error:", err);
+            console.error("Industrial scanner error:", err);
           } finally {
             setIsLiveScanningFrame(false);
           }
         }
-      }, 800);
+      }, 500); // High-speed 500ms industrial conveyor sampling loop
     } else {
       if (liveScanIntervalRef.current) {
         clearInterval(liveScanIntervalRef.current);
