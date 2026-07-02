@@ -55,26 +55,22 @@ export default function App() {
   const [activeTab, setActiveTab] = useState<'single' | 'existing' | 'batch'>('single');
   const [largeTextMode, setLargeTextMode] = useState(false);
   
-  // Product Registry with scan counters
-  const [productRegistry, setProductRegistry] = useState([
-    { id: 'app-101', brandName: 'OLD TOM DISTILLERY', classType: 'Kentucky Straight Bourbon Whiskey', abv: '45% Alc./Vol. (90 Proof)', volume: '750 mL', producer: 'Old Tom Distillery Co, Frankfort, KY', countryOfOrigin: 'United States', labelUrl: '/old_tom_bourbon_label.jpg', scans: 0, lastStatus: 'NEVER SCANNED' },
-    { id: 'app-102', brandName: "STONE'S THROW BREWING", classType: 'India Pale Ale (IPA)', abv: '6.8% Alc./Vol.', volume: '12 FL. OZ.', producer: 'Stone\'s Throw Brewing Co, Seattle, WA', countryOfOrigin: 'United States', labelUrl: '/stones_throw_beer_label.jpg', scans: 0, lastStatus: 'NEVER SCANNED' },
-    { id: 'app-103', brandName: 'CHATEAU BORDEAUX', classType: 'Bordeaux Red Wine', abv: '13.5% Alc. by Vol.', volume: '750 mL', producer: 'Chateau Bordeaux SA, Bordeaux, France', countryOfOrigin: 'France', labelUrl: '/chateau_bordeaux_label.jpg', scans: 0, lastStatus: 'NEVER SCANNED' }
-  ]);
+  // Product Registry - Empty by default, agents populate as needed
+  const [productRegistry, setProductRegistry] = useState<any[]>([]);
 
   // Keep track of active prefilled product ID
-  const [activeProductId, setActiveProductId] = useState<string | null>('app-101');
+  const [activeProductId, setActiveProductId] = useState<string | null>(null);
 
-  // Single Workspace Form Input States
-  const [formBrandName, setFormBrandName] = useState('OLD TOM DISTILLERY');
-  const [formClassType, setFormClassType] = useState('Kentucky Straight Bourbon Whiskey');
-  const [formAbv, setFormAbv] = useState('45% Alc./Vol. (90 Proof)');
-  const [formVolume, setFormVolume] = useState('750 mL');
-  const [formProducer, setFormProducer] = useState('Old Tom Distillery Co, Frankfort, KY');
-  const [formCountryOfOrigin, setFormCountryOfOrigin] = useState('United States');
+  // Single Workspace Form Input States - Start empty for clean slate
+  const [formBrandName, setFormBrandName] = useState('');
+  const [formClassType, setFormClassType] = useState('');
+  const [formAbv, setFormAbv] = useState('');
+  const [formVolume, setFormVolume] = useState('');
+  const [formProducer, setFormProducer] = useState('');
+  const [formCountryOfOrigin, setFormCountryOfOrigin] = useState('');
 
-  // Active Label Image State
-  const [labelImage, setLabelImage] = useState<string>('/old_tom_bourbon_label.jpg');
+  // Active Label Image State - Start empty
+  const [labelImage, setLabelImage] = useState<string | null>(null);
   
   // AI OCR States
   const [verificationResult, setVerificationResult] = useState<VerificationResult | null>(null);
@@ -166,9 +162,9 @@ export default function App() {
       
       // Determine if the current image is a preloaded preset
       let presetKey = '';
-      if (labelImage.includes('old_tom')) presetKey = 'old_tom_bourbon_label.jpg';
-      else if (labelImage.includes('stones_throw')) presetKey = 'stones_throw_beer_label.jpg';
-      else if (labelImage.includes('chateau_bordeaux')) presetKey = 'chateau_bordeaux_label.jpg';
+      if (labelImage && labelImage.includes('old_tom')) presetKey = 'old_tom_bourbon_label.jpg';
+      else if (labelImage && labelImage.includes('stones_throw')) presetKey = 'stones_throw_beer_label.jpg';
+      else if (labelImage && labelImage.includes('chateau_bordeaux')) presetKey = 'chateau_bordeaux_label.jpg';
       
       if (presetKey && PRESET_OCR_TEXTS[presetKey]) {
         // Run simulated timer representing fast local analysis
@@ -816,9 +812,9 @@ export default function App() {
         {activeTab === 'batch' && (
           <div style={{ maxWidth: '1200px', margin: '0 auto', display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
             <div className="glass-card">
-              <h2>Batch Compliance Intake</h2>
+              <h2>Verify Batch</h2>
               <p className="opacity-50" style={{ marginBottom: '1.5rem', fontSize: '0.9rem' }}>
-                Bulk compliance processing pipeline. Processes 200+ labels simultaneously, running auto-verifications on all TTB parameters.
+                Bulk compliance processing. Agents can upload batches of label images for automated TTB compliance verification.
               </p>
 
               <div className="batch-stats-grid" style={{ marginBottom: '1.5rem' }}>
