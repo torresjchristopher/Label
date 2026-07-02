@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import Tesseract from 'tesseract.js';
+import { pipeline } from '@xenova/transformers';
 import {
   ShieldCheck,
   Camera,
@@ -152,30 +152,31 @@ export default function App() {
   const [isLiveScanningFrame, setIsLiveScanningFrame] = useState(false);
   const liveScanIntervalRef = useRef<any>(null);
   const ocrFrameHistoryRef = useRef<string[]>([]);
-  const tesseractWorkerRef = useRef<any>(null);
+  const ocrPipelineRef = useRef<any>(null);
 
   useEffect(() => {
     if (cameraActive) {
       ocrFrameHistoryRef.current = [];
-      
-      // Create a persistent Tesseract worker ONCE when camera activates.
-      // This pre-loads the ~15MB English model so subsequent recognize() calls
-      // are fast instead of re-downloading the model each time.
-      let workerReady = false;
+
+      // Initialize Transformers.js OCR pipeline (TrOCR for label text extraction)
+      let pipelineReady = false;
       (async () => {
         try {
-          console.log("Initializing persistent Tesseract OCR worker...");
-          const worker = await Tesseract.createWorker('eng');
-          tesseractWorkerRef.current = worker;
-          workerReady = true;
-          console.log("Tesseract worker ready — live scanning active");
+          console.log("Initializing Transformers.js OCR pipeline for TTB label processing...");
+          const ocrPipe = await pipeline('image-to-text', 'Xenova/trocr-base-printed', {
+            quantized: true,
+            progress_callback: (progress) => console.log(`OCR Model Loading: ${Math.round(progress)}%`)
+          });
+          ocrPipelineRef.current = ocrPipe;
+          pipelineReady = true;
+          console.log("✅ Transformers.js TrOCR pipeline ready");
         } catch (err) {
-          console.error("Failed to create Tesseract worker:", err);
+          console.error("Failed to initialize TrOCR pipeline:", err);
         }
       })();
-      
+
       liveScanIntervalRef.current = setInterval(async () => {
-        if (!workerReady || !tesseractWorkerRef.current) return;
+        if (!pipelineReady || !ocrPipelineRef.current) return;
         if (isLiveScanningFrame || isScanning) return;
 
         if (videoRef.current && videoRef.current.readyState === 4) {
@@ -192,11 +193,14 @@ export default function App() {
 
             if (ctx) {
               ctx.drawImage(videoRef.current, 0, 0, canvas.width, canvas.height);
-              const dataUrl = canvas.toDataURL('image/png');
-              
-              // Use the persistent pre-loaded worker (no re-initialization)
-              const { data: { text } } = await tesseractWorkerRef.current.recognize(dataUrl);
-              console.log("Live OCR raw text:", text);
+              const imageInput = canvas;
+
+              const ocrResult = await ocrPipelineRef.current(imageInput, {
+                max_new_tokens: 100,
+                num_beams: 2
+              });
+              const text = Array.isArray(ocrResult) ? ocrResult[0]?.generated_text : ocrResult?.generated_text || '';
+              console.log("Live TrOCR raw text for TTB label:", text);
 
               if (text && text.trim().length > 5) {
                 ocrFrameHistoryRef.current.push(text);
@@ -251,9 +255,8 @@ export default function App() {
         liveScanIntervalRef.current = null;
       }
       // Terminate the persistent worker when camera is closed
-      if (tesseractWorkerRef.current) {
-        tesseractWorkerRef.current.terminate().catch(() => {});
-        tesseractWorkerRef.current = null;
+      if (ocrPipelineRef.current) {
+        ocrPipelineRef.current = null;
       }
       setLiveScanResult(null);
       lastAudioStatusRef.current = null;
@@ -264,9 +267,8 @@ export default function App() {
       if (liveScanIntervalRef.current) {
         clearInterval(liveScanIntervalRef.current);
       }
-      if (tesseractWorkerRef.current) {
-        tesseractWorkerRef.current.terminate().catch(() => {});
-        tesseractWorkerRef.current = null;
+      if (ocrPipelineRef.current) {
+        ocrPipelineRef.current = null;
       }
     };
   }, [cameraActive, formBrandName, formClassType, formAbv, formVolume, formProducer, formCountryOfOrigin, isLiveScanningFrame, isScanning, soundEnabled]);
@@ -473,6 +475,14 @@ export default function App() {
       }
     }
   };
+  const stopCamera = () => {
+    setCameraActive(false);
+    if (videoRef.current && videoRef.current.srcObject) {
+      const stream = videoRef.current.srcObject as MediaStream;
+      stream.getTracks().forEach(track => track.stop());
+      videoRef.current.srcObject = null;
+    }
+  };
 
   const accumulateVerificationReport = (report: VerificationResult) => {
     const currentKey = `${formBrandName.trim()}||${formClassType.trim()}||${formAbv.trim()}||${formVolume.trim()}`;
@@ -586,7 +596,7 @@ export default function App() {
     setScanProgress(0);
     setScanProgressText('Initializing local OCR Engine...');
     const startTime = Date.now();
-
+    setScanProgressText('Initializing Transformers.js Computer Vision OCR for TTB Compliance...');
     // Construct a mock ColaApplication object from form inputs to match with verification utility
     const appConfig: ColaApplication = {
       id: 'custom-app',
@@ -602,7 +612,7 @@ export default function App() {
       applicantName: 'Manual Review Applicant',
       submitDate: new Date().toISOString().split('T')[0]
     };
-
+    setScanProgressText('Initializing Transformers.js Computer Vision OCR for TTB Compliance...');
     try {
       let finalOcrText = '';
 
@@ -661,22 +671,19 @@ export default function App() {
           img.onerror = () => resolve(imageSrc);
           img.src = imageSrc;
         });
+        // Direct local client-side Transformers.js TrOCR 
+        if (!ocrPipelineRef.current) {
+          ocrPipelineRef.current = await pipeline('image-to-text', 'Xenova/trocr-base-printed', { quantized: true });
+        }
 
-        // Direct local client-side Tesseract OCR for custom files
-        const { data: { text } } = await Tesseract.recognize(
-          processedImageSrc,
-          'eng',
-          {
-            logger: m => {
-              if (m.status === 'recognizing text') {
-                setScanProgress(Math.round(m.progress * 100));
-                setScanProgressText(`Extracting Text: ${Math.round(m.progress * 100)}%`);
-              } else {
-                setScanProgressText(m.status === 'loading tesseract core' ? 'Loading AI weights...' : m.status);
-              }
-            }
-          }
-        );
+        const img = new Image();
+        img.src = processedImageSrc;
+        await new Promise((res) => { img.onload = res; });
+
+        const ocrResult = await ocrPipelineRef.current(img, { max_new_tokens: 150, num_beams: 3 });
+        const text = Array.isArray(ocrResult) ? ocrResult.map(r => r.generated_text).join('\n') : (ocrResult.generated_text || '');
+        console.log("Uploaded File TrOCR Extracted Text:", text);
+        finalOcrText = text;
         console.log("Uploaded File OCR Extracted Text:", text);
         finalOcrText = text;
       }
@@ -1057,7 +1064,7 @@ export default function App() {
                   </span>
 
                   <div className={`score-badge-circle ${verificationResult.complianceScore >= 95 ? 'score-pass' :
-                      verificationResult.complianceScore >= 70 ? 'score-warning' : 'score-fail'
+                    verificationResult.complianceScore >= 70 ? 'score-warning' : 'score-fail'
                     }`}>
                     <span className="score-val">{verificationResult.complianceScore}</span>
                     <span className="score-label">Score</span>
