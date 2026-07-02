@@ -118,6 +118,72 @@ export default function App() {
     }
   }, [largeTextMode]);
 
+  // Live viewfinder frame scan states
+  const [liveScanResult, setLiveScanResult] = useState<VerificationResult | null>(null);
+  const [isLiveScanningFrame, setIsLiveScanningFrame] = useState(false);
+  const liveScanIntervalRef = useRef<any>(null);
+
+  useEffect(() => {
+    if (cameraActive) {
+      liveScanIntervalRef.current = setInterval(async () => {
+        if (isLiveScanningFrame || isScanning) return;
+        
+        if (videoRef.current && videoRef.current.readyState === 4) {
+          setIsLiveScanningFrame(true);
+          try {
+            const canvas = document.createElement('canvas');
+            canvas.width = 400;
+            canvas.height = 300;
+            const ctx = canvas.getContext('2d');
+            if (ctx) {
+              ctx.drawImage(videoRef.current, 0, 0, canvas.width, canvas.height);
+              const dataUrl = canvas.toDataURL('image/jpeg');
+              
+              const { data: { text } } = await Tesseract.recognize(dataUrl, 'eng');
+              
+              if (text && text.trim().length > 10) {
+                const appConfig: ColaApplication = {
+                  id: 'custom-app',
+                  applicationNumber: 'COLA-CUSTOM-INPUT',
+                  brandName: formBrandName,
+                  classType: formClassType,
+                  abv: formAbv,
+                  volume: formVolume,
+                  producer: formProducer,
+                  countryOfOrigin: formCountryOfOrigin,
+                  warningStatement: STANDARD_GOVERNMENT_WARNING,
+                  status: 'PENDING',
+                  applicantName: 'Manual Review Applicant',
+                  submitDate: new Date().toISOString().split('T')[0]
+                };
+                
+                const startTime = Date.now();
+                const report = verifyLabelText(appConfig, text, startTime);
+                setLiveScanResult(report);
+              }
+            }
+          } catch (err) {
+            console.error("Live frame background scan error:", err);
+          } finally {
+            setIsLiveScanningFrame(false);
+          }
+        }
+      }, 2500);
+    } else {
+      if (liveScanIntervalRef.current) {
+        clearInterval(liveScanIntervalRef.current);
+        liveScanIntervalRef.current = null;
+      }
+      setLiveScanResult(null);
+    }
+
+    return () => {
+      if (liveScanIntervalRef.current) {
+        clearInterval(liveScanIntervalRef.current);
+      }
+    };
+  }, [cameraActive, formBrandName, formClassType, formAbv, formVolume, isLiveScanningFrame, isScanning]);
+
   // Export current form fields to a JSON text file for pre-fill
   const handleExportPrefill = () => {
     const data = {
@@ -794,7 +860,7 @@ export default function App() {
                       {cameraActive && (
                         <div style={{ width: '100%', height: '100%', position: 'absolute', inset: 0 }}>
                           <video ref={videoRef} className="camera-viewfinder" playsInline muted></video>
-                          <div className="viewfinder-reticle" style={{ left: '10%', top: '15%' }}>
+                          <div className={`viewfinder-reticle ${liveScanResult ? (liveScanResult.overallPassed ? 'pass' : 'fail') : ''}`} style={{ left: '10%', top: '15%' }}>
                             <div className="viewfinder-corners"></div>
                           </div>
                           <div className="scanner-controls" style={{ gap: '0.75rem', padding: '0 1rem', width: '100%', boxSizing: 'border-box' }}>
