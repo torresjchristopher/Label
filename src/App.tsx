@@ -152,38 +152,53 @@ export default function App() {
   const [isLiveScanningFrame, setIsLiveScanningFrame] = useState(false);
   const liveScanIntervalRef = useRef<any>(null);
   const ocrFrameHistoryRef = useRef<string[]>([]);
+  const tesseractWorkerRef = useRef<any>(null);
 
   useEffect(() => {
     if (cameraActive) {
       ocrFrameHistoryRef.current = [];
+      
+      // Create a persistent Tesseract worker ONCE when camera activates.
+      // This pre-loads the ~15MB English model so subsequent recognize() calls
+      // are fast instead of re-downloading the model each time.
+      let workerReady = false;
+      (async () => {
+        try {
+          console.log("Initializing persistent Tesseract OCR worker...");
+          const worker = await Tesseract.createWorker('eng');
+          tesseractWorkerRef.current = worker;
+          workerReady = true;
+          console.log("Tesseract worker ready — live scanning active");
+        } catch (err) {
+          console.error("Failed to create Tesseract worker:", err);
+        }
+      })();
+      
       liveScanIntervalRef.current = setInterval(async () => {
+        if (!workerReady || !tesseractWorkerRef.current) return;
         if (isLiveScanningFrame || isScanning) return;
 
         if (videoRef.current && videoRef.current.readyState === 4) {
           setIsLiveScanningFrame(true);
           try {
-            // Capture at full native camera resolution
-            const vWidth = videoRef.current.videoWidth || 1920;
-            const vHeight = videoRef.current.videoHeight || 1080;
+            // Capture frame and scale to max 1024px wide for practical OCR
+            const vWidth = videoRef.current.videoWidth || 1280;
+            const vHeight = videoRef.current.videoHeight || 720;
+            const scale = Math.min(1, 1024 / vWidth);
             const canvas = document.createElement('canvas');
-            canvas.width = vWidth;
-            canvas.height = vHeight;
+            canvas.width = Math.round(vWidth * scale);
+            canvas.height = Math.round(vHeight * scale);
             const ctx = canvas.getContext('2d');
 
             if (ctx) {
-              ctx.drawImage(videoRef.current, 0, 0, vWidth, vHeight);
-
-              // Pass RAW unprocessed frame to Tesseract as lossless PNG
-              // Tesseract.js has its own internal Otsu binarization that handles
-              // real-world scenes (curved bottles, glare, shadows) better than
-              // any custom preprocessing we can apply
+              ctx.drawImage(videoRef.current, 0, 0, canvas.width, canvas.height);
               const dataUrl = canvas.toDataURL('image/png');
               
-              const { data: { text } } = await Tesseract.recognize(dataUrl, 'eng');
+              // Use the persistent pre-loaded worker (no re-initialization)
+              const { data: { text } } = await tesseractWorkerRef.current.recognize(dataUrl);
               console.log("Live OCR raw text:", text);
 
               if (text && text.trim().length > 5) {
-                // Accumulate rolling history of last 3 frames
                 ocrFrameHistoryRef.current.push(text);
                 if (ocrFrameHistoryRef.current.length > 3) {
                   ocrFrameHistoryRef.current.shift();
@@ -211,7 +226,6 @@ export default function App() {
                 setVerificationResult(report);
                 setLabelImage(canvas.toDataURL('image/jpeg', 0.85));
 
-                // Sound cue & batch entry on state transition
                 const currentStatus = report.overallPassed ? 'PASS' : 'FAIL';
                 if (lastAudioStatusRef.current !== currentStatus) {
                   lastAudioStatusRef.current = currentStatus;
@@ -230,11 +244,16 @@ export default function App() {
             setIsLiveScanningFrame(false);
           }
         }
-      }, 3000); // 3-second interval — Tesseract needs time to process full-res frames
+      }, 3000);
     } else {
       if (liveScanIntervalRef.current) {
         clearInterval(liveScanIntervalRef.current);
         liveScanIntervalRef.current = null;
+      }
+      // Terminate the persistent worker when camera is closed
+      if (tesseractWorkerRef.current) {
+        tesseractWorkerRef.current.terminate().catch(() => {});
+        tesseractWorkerRef.current = null;
       }
       setLiveScanResult(null);
       lastAudioStatusRef.current = null;
@@ -244,6 +263,10 @@ export default function App() {
     return () => {
       if (liveScanIntervalRef.current) {
         clearInterval(liveScanIntervalRef.current);
+      }
+      if (tesseractWorkerRef.current) {
+        tesseractWorkerRef.current.terminate().catch(() => {});
+        tesseractWorkerRef.current = null;
       }
     };
   }, [cameraActive, formBrandName, formClassType, formAbv, formVolume, formProducer, formCountryOfOrigin, isLiveScanningFrame, isScanning, soundEnabled]);
