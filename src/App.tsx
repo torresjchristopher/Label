@@ -1,5 +1,4 @@
 import { useState, useEffect, useRef } from 'react';
-import { pipeline } from '@xenova/transformers';
 import {
   ShieldCheck,
   Camera,
@@ -14,7 +13,8 @@ import {
 
 import { STANDARD_GOVERNMENT_WARNING } from './database';
 import { verifyLabelText } from './utils/verification';
-// preprocessCanvasForOcr kept in utils for potential future use with static images
+import { initOcrPipeline, runOcr } from './utils/ocr';
+import { extractLabelFields } from './utils/labelExtractor';
 import { playPassTone, playFailTone, triggerHapticFeedback } from './utils/audio';
 import type { ColaApplication, VerificationResult } from './types';
 
@@ -163,11 +163,9 @@ export default function App() {
       (async () => {
         try {
           console.log("Initializing Transformers.js OCR pipeline for TTB label processing...");
-          const ocrPipe = await pipeline('image-to-text', 'Xenova/trocr-base-printed', {
-            quantized: true,
-            progress_callback: (progress) => console.log(`OCR Model Loading: ${Math.round(progress)}%`)
-          });
-          ocrPipelineRef.current = ocrPipe;
+          ocrPipelineRef.current = await initOcrPipeline(
+            (pct) => console.log(`OCR Model Loading: ${pct}%`)
+          );
           pipelineReady = true;
           console.log("✅ Transformers.js TrOCR pipeline ready");
         } catch (err) {
@@ -193,14 +191,11 @@ export default function App() {
 
             if (ctx) {
               ctx.drawImage(videoRef.current, 0, 0, canvas.width, canvas.height);
-              const imageInput = canvas;
 
-              const ocrResult = await ocrPipelineRef.current(imageInput, {
-                max_new_tokens: 100,
-                num_beams: 2
-              });
-              const text = Array.isArray(ocrResult) ? ocrResult[0]?.generated_text : ocrResult?.generated_text || '';
-              console.log("Live TrOCR raw text for TTB label:", text);
+              // Run multi-pass OCR with confidence gating
+              const ocrResult = await runOcr(canvas, ocrPipelineRef.current);
+              const text = ocrResult.text;
+              console.log(`[Live OCR] pass=${ocrResult.pass} confidence=${ocrResult.confidence.toFixed(2)} text=${text.substring(0, 80)}`);
 
               if (text && text.trim().length > 5) {
                 ocrFrameHistoryRef.current.push(text);
@@ -225,7 +220,12 @@ export default function App() {
                 };
 
                 const startTime = Date.now();
-                const report = verifyLabelText(appConfig, combinedOcrText, startTime);
+                const baseReport = verifyLabelText(appConfig, combinedOcrText, startTime);
+                const report: VerificationResult = {
+                  ...baseReport,
+                  extractedFields: extractLabelFields(combinedOcrText),
+                  ocrConfidence: ocrResult.confidence,
+                };
                 setLiveScanResult(report);
                 setVerificationResult(report);
                 setLabelImage(canvas.toDataURL('image/jpeg', 0.85));
@@ -254,7 +254,7 @@ export default function App() {
         clearInterval(liveScanIntervalRef.current);
         liveScanIntervalRef.current = null;
       }
-      // Terminate the persistent worker when camera is closed
+      // Release the OCR pipeline when camera is closed
       if (ocrPipelineRef.current) {
         ocrPipelineRef.current = null;
       }
@@ -475,14 +475,6 @@ export default function App() {
       }
     }
   };
-  const stopCamera = () => {
-    setCameraActive(false);
-    if (videoRef.current && videoRef.current.srcObject) {
-      const stream = videoRef.current.srcObject as MediaStream;
-      stream.getTracks().forEach(track => track.stop());
-      videoRef.current.srcObject = null;
-    }
-  };
 
   const accumulateVerificationReport = (report: VerificationResult) => {
     const currentKey = `${formBrandName.trim()}||${formClassType.trim()}||${formAbv.trim()}||${formVolume.trim()}`;
@@ -594,9 +586,8 @@ export default function App() {
     }
     setIsScanning(true);
     setScanProgress(0);
-    setScanProgressText('Initializing local OCR Engine...');
-    const startTime = Date.now();
     setScanProgressText('Initializing Transformers.js Computer Vision OCR for TTB Compliance...');
+    const startTime = Date.now();
     // Construct a mock ColaApplication object from form inputs to match with verification utility
     const appConfig: ColaApplication = {
       id: 'custom-app',
@@ -612,9 +603,9 @@ export default function App() {
       applicantName: 'Manual Review Applicant',
       submitDate: new Date().toISOString().split('T')[0]
     };
-    setScanProgressText('Initializing Transformers.js Computer Vision OCR for TTB Compliance...');
     try {
       let finalOcrText = '';
+      let ocrConfidence = 1.0;
 
       // Determine if the current image is a preloaded preset
       let presetKey = '';
@@ -638,15 +629,14 @@ export default function App() {
         });
         finalOcrText = PRESET_OCR_TEXTS[presetKey];
       } else {
-        // Normalize uploaded high-res image canvas (max 1600px dimension) for optimal OCR clarity
-        const processedImageSrc = await new Promise<string>((resolve) => {
+        // Build a canvas from the uploaded image (cap at 2000px for browser memory)
+        const sourceCanvas = await new Promise<HTMLCanvasElement>((resolve) => {
           const img = new Image();
           img.crossOrigin = 'anonymous';
           img.onload = () => {
             const canvas = document.createElement('canvas');
             let width = img.width;
             let height = img.height;
-            // Cap at 2000px max dimension to prevent browser memory issues
             const maxDim = 2000;
             if (width > maxDim || height > maxDim) {
               if (width > height) {
@@ -660,35 +650,46 @@ export default function App() {
             canvas.width = width;
             canvas.height = height;
             const ctx = canvas.getContext('2d');
-            if (ctx) {
-              ctx.drawImage(img, 0, 0, width, height);
-              // Pass raw image as lossless PNG — let Tesseract handle its own binarization
-              resolve(canvas.toDataURL('image/png'));
-            } else {
-              resolve(imageSrc);
-            }
+            if (ctx) ctx.drawImage(img, 0, 0, width, height);
+            resolve(canvas);
           };
-          img.onerror = () => resolve(imageSrc);
+          img.onerror = () => {
+            const fallback = document.createElement('canvas');
+            resolve(fallback);
+          };
           img.src = imageSrc;
         });
-        // Direct local client-side Transformers.js TrOCR 
+
+        setScanProgressText('Running multi-pass Transformer.js OCR...');
+        setScanProgress(20);
+
+        // Initialise pipeline if not already loaded (e.g. file upload without camera)
         if (!ocrPipelineRef.current) {
-          ocrPipelineRef.current = await pipeline('image-to-text', 'Xenova/trocr-base-printed', { quantized: true });
+          ocrPipelineRef.current = await initOcrPipeline(
+            (pct) => setScanProgress(20 + Math.round(pct * 0.5))
+          );
         }
 
-        const img = new Image();
-        img.src = processedImageSrc;
-        await new Promise((res) => { img.onload = res; });
+        setScanProgress(70);
+        setScanProgressText('Applying confidence-gated OCR passes...');
 
-        const ocrResult = await ocrPipelineRef.current(img, { max_new_tokens: 150, num_beams: 3 });
-        const text = Array.isArray(ocrResult) ? ocrResult.map(r => r.generated_text).join('\n') : (ocrResult.generated_text || '');
-        console.log("Uploaded File TrOCR Extracted Text:", text);
-        finalOcrText = text;
-        console.log("Uploaded File OCR Extracted Text:", text);
-        finalOcrText = text;
+        // Multi-pass OCR with confidence gating and preprocessing variants
+        const ocrResult = await runOcr(sourceCanvas, ocrPipelineRef.current);
+        finalOcrText = ocrResult.text;
+        ocrConfidence = ocrResult.confidence;
+        console.log(`[OCR] Final: pass=${ocrResult.pass} confidence=${ocrResult.confidence.toFixed(2)} text="${finalOcrText.substring(0, 80)}"`);
+
+        setScanProgress(100);
       }
 
-      const report = verifyLabelText(appConfig, finalOcrText, startTime);
+      setScanProgressText('Extracting structured fields and verifying compliance...');
+      const extracted = extractLabelFields(finalOcrText);
+      const baseReport = verifyLabelText(appConfig, finalOcrText, startTime);
+      const report: VerificationResult = {
+        ...baseReport,
+        extractedFields: extracted,
+        ocrConfidence,
+      };
       setVerificationResult(report);
       accumulateVerificationReport(report);
 
@@ -701,7 +702,13 @@ export default function App() {
     } catch (error) {
       console.error("OCR Scan Error:", error);
       setScanProgressText("Scan Error. Reverting to fallback rules.");
-      const fallbackReport = verifyLabelText(appConfig, PRESET_OCR_TEXTS['old_tom_bourbon_label.jpg'], startTime);
+      const fallbackText = PRESET_OCR_TEXTS['old_tom_bourbon_label.jpg'];
+      const fallbackBase = verifyLabelText(appConfig, fallbackText, startTime);
+      const fallbackReport: VerificationResult = {
+        ...fallbackBase,
+        extractedFields: extractLabelFields(fallbackText),
+        ocrConfidence: 0,
+      };
       setVerificationResult(fallbackReport);
       accumulateVerificationReport(fallbackReport);
 

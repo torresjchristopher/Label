@@ -1,8 +1,8 @@
 /**
- * Pre-processes an HTML5 Canvas for Tesseract.js OCR analysis.
- * 
+ * Pre-processes an HTML5 Canvas for Transformer.js TrOCR analysis.
+ *
  * Pipeline:
- * 1. Upscale small images (Tesseract needs ~300 DPI equivalent)
+ * 1. Upscale small images to at least 800px wide for reliable OCR
  * 2. Convert to grayscale using luminance weights
  * 3. Apply adaptive local threshold binarization (black text on white background)
  * 4. Output as high-contrast binary image ideal for OCR character segmentation
@@ -10,7 +10,7 @@
 export function preprocessCanvasForOcr(canvas: HTMLCanvasElement): HTMLCanvasElement {
   const processedCanvas = document.createElement('canvas');
   
-  // Step 1: Upscale small images — Tesseract accuracy drops sharply below ~600px width
+  // Step 1: Upscale small images — TrOCR accuracy improves above ~800px width
   let scale = 1;
   if (canvas.width < 800) {
     scale = Math.ceil(800 / canvas.width);
@@ -94,4 +94,238 @@ export function preprocessCanvasForOcr(canvas: HTMLCanvasElement): HTMLCanvasEle
     console.warn("Canvas pre-processing fallback:", e);
     return canvas;
   }
+}
+
+// ---------------------------------------------------------------------------
+// Contrast normalisation and denoise helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Apply histogram stretch and mild box-blur denoise to a grayscale pixel array.
+ *
+ * Steps:
+ *  1. Histogram stretching: remap [p5, p95] → [0, 255]
+ *  2. 3×3 box-blur for noise suppression
+ */
+function applyContrastAndDenoise(
+  gray: Uint8Array,
+  w: number,
+  h: number
+): Uint8Array {
+  // 1. Histogram stretch
+  const sorted = new Uint8Array(gray).sort();
+  const p5 = sorted[Math.floor(sorted.length * 0.05)];
+  const p95 = sorted[Math.floor(sorted.length * 0.95)];
+  const range = p95 - p5 || 1;
+
+  const stretched = new Uint8Array(w * h);
+  for (let i = 0; i < gray.length; i++) {
+    stretched[i] = Math.max(0, Math.min(255, Math.round(((gray[i] - p5) / range) * 255)));
+  }
+
+  // 2. 3×3 box-blur
+  const blurred = new Uint8Array(w * h);
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      let sum = 0;
+      let count = 0;
+      for (let dy = -1; dy <= 1; dy++) {
+        for (let dx = -1; dx <= 1; dx++) {
+          const ny = y + dy;
+          const nx = x + dx;
+          if (ny >= 0 && ny < h && nx >= 0 && nx < w) {
+            sum += stretched[ny * w + nx];
+            count++;
+          }
+        }
+      }
+      blurred[y * w + x] = Math.round(sum / count);
+    }
+  }
+
+  return blurred;
+}
+
+/**
+ * Heuristic deskew: rotate the canvas by a small angle if needed.
+ *
+ * Uses projection profile analysis on the binarized image — the angle that
+ * produces the sharpest horizontal projection (maximum variance of row sums)
+ * is selected. Search range is ±5° in 1° steps.
+ */
+export function deskewCanvas(canvas: HTMLCanvasElement): HTMLCanvasElement {
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return canvas;
+
+  const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+  const d = imgData.data;
+  const w = canvas.width;
+  const h = canvas.height;
+
+  // Build grayscale for projection
+  const gray = new Uint8Array(w * h);
+  for (let i = 0; i < d.length; i += 4) {
+    gray[i / 4] = Math.round(0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2]);
+  }
+
+  let bestAngle = 0;
+  let bestVariance = -1;
+
+  for (let angleDeg = -5; angleDeg <= 5; angleDeg++) {
+    const rad = (angleDeg * Math.PI) / 180;
+    const cos = Math.cos(rad);
+    const sin = Math.sin(rad);
+    const cx = w / 2;
+    const cy = h / 2;
+
+    const rowSums = new Float64Array(h);
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        const nx = Math.round((x - cx) * cos + (y - cy) * sin + cx);
+        const ny = Math.round(-(x - cx) * sin + (y - cy) * cos + cy);
+        if (nx >= 0 && nx < w && ny >= 0 && ny < h) {
+          rowSums[y] += gray[ny * w + nx] < 128 ? 1 : 0;
+        }
+      }
+    }
+
+    const mean = rowSums.reduce((s, v) => s + v, 0) / h;
+    const variance = rowSums.reduce((s, v) => s + (v - mean) ** 2, 0) / h;
+
+    if (variance > bestVariance) {
+      bestVariance = variance;
+      bestAngle = angleDeg;
+    }
+  }
+
+  if (bestAngle === 0) return canvas;
+
+  const rotated = document.createElement('canvas');
+  rotated.width = w;
+  rotated.height = h;
+  const rCtx = rotated.getContext('2d');
+  if (!rCtx) return canvas;
+
+  rCtx.translate(w / 2, h / 2);
+  rCtx.rotate((bestAngle * Math.PI) / 180);
+  rCtx.drawImage(canvas, -w / 2, -h / 2);
+  rCtx.setTransform(1, 0, 0, 1, 0, 0);
+
+  return rotated;
+}
+
+/**
+ * Create a high-contrast preprocessed canvas using contrast normalisation +
+ * denoise + Otsu global threshold. Used as the third retry pass for low-light
+ * or glare-affected bottle images.
+ */
+export function preprocessCanvasHighContrast(
+  canvas: HTMLCanvasElement
+): HTMLCanvasElement {
+  const out = document.createElement('canvas');
+  out.width = canvas.width;
+  out.height = canvas.height;
+
+  const ctx = out.getContext('2d');
+  if (!ctx) return canvas;
+
+  ctx.drawImage(canvas, 0, 0);
+
+  try {
+    const imgData = ctx.getImageData(0, 0, out.width, out.height);
+    const d = imgData.data;
+    const w = out.width;
+    const h = out.height;
+
+    const gray = new Uint8Array(w * h);
+    for (let i = 0; i < d.length; i += 4) {
+      gray[i / 4] = Math.round(0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2]);
+    }
+
+    const enhanced = applyContrastAndDenoise(gray, w, h);
+
+    // Otsu global threshold
+    const hist = new Uint32Array(256);
+    for (const v of enhanced) hist[v]++;
+    const total = w * h;
+    let sum = 0;
+    for (let t = 0; t < 256; t++) sum += t * hist[t];
+    let sumB = 0;
+    let wB = 0;
+    let bestThresh = 128;
+    let bestVar = 0;
+    for (let t = 0; t < 256; t++) {
+      wB += hist[t];
+      if (wB === 0) continue;
+      const wF = total - wB;
+      if (wF === 0) break;
+      sumB += t * hist[t];
+      const mB = sumB / wB;
+      const mF = (sum - sumB) / wF;
+      const between = wB * wF * (mB - mF) ** 2;
+      if (between > bestVar) {
+        bestVar = between;
+        bestThresh = t;
+      }
+    }
+
+    for (let i = 0; i < enhanced.length; i++) {
+      const v = enhanced[i] < bestThresh ? 0 : 255;
+      const idx = i * 4;
+      d[idx] = v;
+      d[idx + 1] = v;
+      d[idx + 2] = v;
+      d[idx + 3] = 255;
+    }
+
+    ctx.putImageData(imgData, 0, 0);
+    return out;
+  } catch {
+    return canvas;
+  }
+}
+
+/**
+ * Create multiple preprocessing variants of a source canvas for multi-pass OCR.
+ *
+ * Variant 1 – Raw scale-up: minimal preprocessing (best for clean, well-lit labels)
+ * Variant 2 – Deskew + adaptive threshold: for curved/tilted labels
+ * Variant 3 – High contrast + Otsu threshold: for low-light or glare-affected images
+ *
+ * @returns Array of canvases ordered from least to most aggressive preprocessing
+ */
+export function createPreprocessingVariants(
+  canvas: HTMLCanvasElement
+): HTMLCanvasElement[] {
+  // Variant 1: scale up to ≥800px width, keep colour (TrOCR handles colour well)
+  const v1 = document.createElement('canvas');
+  const scale = canvas.width < 800 ? Math.ceil(800 / canvas.width) : 1;
+  v1.width = canvas.width * scale;
+  v1.height = canvas.height * scale;
+  const ctx1 = v1.getContext('2d');
+  if (ctx1) {
+    ctx1.imageSmoothingEnabled = scale > 1 ? false : true;
+    ctx1.drawImage(canvas, 0, 0, v1.width, v1.height);
+  }
+
+  // Variant 2: deskew + adaptive binarization
+  const deskewed = deskewCanvas(canvas);
+  const v2 = preprocessCanvasForOcr(deskewed);
+
+  // Variant 3: high-contrast Otsu threshold
+  const v3 = preprocessCanvasHighContrast(canvas);
+
+  return [v1, v2, v3];
+}
+
+/**
+ * Convert a preprocessed canvas to an HTMLImageElement for use with the
+ * TrOCR pipeline (which accepts HTMLImageElement input).
+ */
+export function preprocessedCanvasToImage(
+  canvas: HTMLCanvasElement
+): HTMLImageElement {
+  const img = new Image();
+  img.src = canvas.toDataURL('image/png');
+  return img;
 }

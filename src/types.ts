@@ -50,6 +50,43 @@ export interface AdditionalCheck {
   message: string;
 }
 
+// ---------------------------------------------------------------------------
+// OCR result types
+// ---------------------------------------------------------------------------
+
+/** Result from the Transformer.js OCR service. */
+export interface OcrResult {
+  text: string;
+  confidence: number;
+  pass: number;
+}
+
+/** A single structured label field with its confidence and raw match string. */
+export interface ExtractedField<T = string> {
+  value: T | null;
+  confidence: number;
+  rawMatch: string | null;
+}
+
+export interface ExtractedVolumeValue {
+  amount: number;
+  unit: string;
+  normalizedMl: number;
+}
+
+/** Structured fields extracted from OCR text for alcohol bottle labels. */
+export interface ExtractedLabelFields {
+  brand: ExtractedField<string>;
+  abv: ExtractedField<number>;
+  volume: ExtractedField<ExtractedVolumeValue>;
+  governmentWarningPresent: ExtractedField<boolean>;
+  overallConfidence: number;
+}
+
+// ---------------------------------------------------------------------------
+// Verification result
+// ---------------------------------------------------------------------------
+
 export interface VerificationResult {
   brandName: FieldVerification;
   classType: FieldVerification;
@@ -63,4 +100,9 @@ export interface VerificationResult {
   processingTimeMs: number;
   additionalChecks: AdditionalCheck[];
   complianceScore: number;
+  /** Structured fields extracted from OCR text (populated by the scan pipeline). */
+  extractedFields?: ExtractedLabelFields;
+  /** OCR confidence score from the Transformer.js pipeline pass. */
+  ocrConfidence?: number;
 }
+
