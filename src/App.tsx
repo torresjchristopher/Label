@@ -587,21 +587,35 @@ export default function App() {
     await runComplianceCheckWithImage(labelImage);
   };
 
-  // Mobile camera controls
+  // Mobile and Desktop camera stream handler
   const startCamera = async () => {
     setVerificationResult(null);
+    setCameraActive(true);
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: 'environment' }
+        video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } }
       });
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-        videoRef.current.play();
-        setCameraActive(true);
-      }
+      setTimeout(() => {
+        if (videoRef.current) {
+          videoRef.current.srcObject = stream;
+          videoRef.current.play().catch(e => console.error("Video playback error:", e));
+        }
+      }, 50);
     } catch (err) {
-      console.error("Camera access error:", err);
-      alert("Local camera blocked or unavailable. You can use the preset cases or upload a saved label photo.");
+      console.error("Primary camera access error, trying basic constraints:", err);
+      try {
+        const fallbackStream = await navigator.mediaDevices.getUserMedia({ video: true });
+        setTimeout(() => {
+          if (videoRef.current) {
+            videoRef.current.srcObject = fallbackStream;
+            videoRef.current.play().catch(e => console.error("Fallback video playback error:", e));
+          }
+        }, 50);
+      } catch (fallbackErr) {
+        console.error("Camera access error:", fallbackErr);
+        setCameraActive(false);
+        alert("Camera access was blocked or is unavailable on this device/browser. You can upload a label photo instead.");
+      }
     }
   };
 
@@ -611,8 +625,8 @@ export default function App() {
       const tracks = stream.getTracks();
       tracks.forEach(track => track.stop());
       videoRef.current.srcObject = null;
-      setCameraActive(false);
     }
+    setCameraActive(false);
   };
 
   const captureImageAndLoad = () => {
