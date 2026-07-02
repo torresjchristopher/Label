@@ -343,15 +343,13 @@ export default function App() {
 
   return (
     <div className="app-container">
-      {/* Premium Header */}
+      {/* Header */}
       <header>
         <div className="logo-section">
-          <ShieldCheck size={32} className="logo-icon" />
           <div>
             <h1 className="logo-title">LabelGuard AI</h1>
-            <p className="opacity-50" style={{ fontSize: '0.75rem', marginTop: '-3px' }}>TTB Compliance Engine</p>
+            <p style={{ opacity: 0.7, fontSize: '0.8rem', marginTop: '-2px' }}>TTB Compliance Engine</p>
           </div>
-          <span className="logo-badge">Prototype</span>
         </div>
 
         <div className="header-actions">
