@@ -59,8 +59,11 @@ export function verifyLabelText(app: ColaApplication, ocrText: string, startTime
   
   const expectedBrand = app.brandName;
   if (isStandaloneMonitoring) {
-    const lines = ocrText.split('\n').map(l => l.trim()).filter(l => l.length > 2 && !l.toLowerCase().includes('warning') && !l.toLowerCase().includes('alc'));
-    const detectedBrand = lines[0] || '';
+    const validBrandLines = ocrText
+      .split('\n')
+      .map(l => l.trim().replace(/[^\w\s'’-]/g, '').trim())
+      .filter(l => l.length >= 3 && !l.toLowerCase().includes('warning') && !l.toLowerCase().includes('alc') && !l.toLowerCase().includes('vol') && !/^\d+$/.test(l));
+    const detectedBrand = validBrandLines[0] || '';
     if (detectedBrand) {
       brandStatus = 'MATCH';
       brandMsg = `Standalone Scan: Detected brand title "${detectedBrand}" on label artwork.`;
@@ -124,11 +127,11 @@ export function verifyLabelText(app: ColaApplication, ocrText: string, startTime
   
   const expectedClass = app.classType;
   if (isStandaloneMonitoring) {
-    const classTerms = ['whiskey', 'bourbon', 'whisky', 'beer', 'ale', 'ipa', 'wine', 'vodka', 'rum', 'tequila', 'gin', 'brandy', 'spirits', 'stout', 'lager'];
-    const foundTerm = classTerms.find(term => normOcrLower.includes(term));
-    if (foundTerm) {
+    const classRegex = /\b(whiskey|bourbon|whisky|beer|ale|ipa|wine|vodka|rum|tequila|gin|brandy|spirits|stout|lager)\b/i;
+    const classMatch = normOcrLower.match(classRegex);
+    if (classMatch) {
       classStatus = 'MATCH';
-      detectedClass = foundTerm.toUpperCase();
+      detectedClass = classMatch[0].toUpperCase();
       classMsg = `Standalone Scan: Mandatory class/type designation detected ("${detectedClass}").`;
     } else {
       classStatus = 'MISMATCH';

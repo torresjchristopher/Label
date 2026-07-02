@@ -148,13 +148,15 @@ export default function App() {
 
   const [soundEnabled, setSoundEnabled] = useState(true);
 
-  // Live viewfinder automatic 4-second background snapshot scanner
+  // Live viewfinder automatic real-time rolling snapshot scanner
   const [liveScanResult, setLiveScanResult] = useState<VerificationResult | null>(null);
   const [isLiveScanningFrame, setIsLiveScanningFrame] = useState(false);
   const liveScanIntervalRef = useRef<any>(null);
+  const ocrFrameHistoryRef = useRef<string[]>([]);
 
   useEffect(() => {
     if (cameraActive) {
+      ocrFrameHistoryRef.current = [];
       liveScanIntervalRef.current = setInterval(async () => {
         if (isLiveScanningFrame || isScanning) return;
         
@@ -171,10 +173,16 @@ export default function App() {
               const dataUrl = processedCanvas.toDataURL('image/jpeg');
               
               const { data: { text } } = await Tesseract.recognize(dataUrl, 'eng');
-              console.log("Extracted Live Camera OCR Text:", text);
               
-              // Real-time text component recognition
-              if (text && text.trim().length > 8) {
+              if (text && text.trim().length > 5) {
+                // Accumulate rolling history of last 4 camera video frames
+                ocrFrameHistoryRef.current.push(text);
+                if (ocrFrameHistoryRef.current.length > 4) {
+                  ocrFrameHistoryRef.current.shift();
+                }
+                const combinedOcrText = ocrFrameHistoryRef.current.join('\n');
+                console.log("Accumulated Live Camera OCR Text:", combinedOcrText);
+
                 const appConfig: ColaApplication = {
                   id: 'custom-app',
                   applicationNumber: 'COLA-CUSTOM-INPUT',
@@ -191,7 +199,7 @@ export default function App() {
                 };
                 
                 const startTime = Date.now();
-                const report = verifyLabelText(appConfig, text, startTime);
+                const report = verifyLabelText(appConfig, combinedOcrText, startTime);
                 setLiveScanResult(report);
                 setVerificationResult(report);
                 setLabelImage(dataUrl);
@@ -214,7 +222,7 @@ export default function App() {
             setIsLiveScanningFrame(false);
           }
         }
-      }, 1000);
+      }, 800);
     } else {
       if (liveScanIntervalRef.current) {
         clearInterval(liveScanIntervalRef.current);
@@ -222,6 +230,7 @@ export default function App() {
       }
       setLiveScanResult(null);
       lastAudioStatusRef.current = null;
+      ocrFrameHistoryRef.current = [];
     }
 
     return () => {
