@@ -380,8 +380,8 @@ export default function App() {
         reader.onload = (event) => {
           const dataUrl = event.target?.result as string;
           setLabelImage(dataUrl);
-          setVerificationResult(null);
           stopCamera();
+          runComplianceCheckWithImage(dataUrl);
         };
         reader.readAsDataURL(file);
       }
@@ -993,9 +993,9 @@ export default function App() {
                         <span className={`text-${verificationResult.brandName.status.toLowerCase()}`}>{verificationResult.brandName.status}</span>
                       </div>
                       <div className="result-details-col">
-                        <span style={{ color: 'var(--text-secondary)' }}>Expected:</span> <strong>{verificationResult.brandName.expected}</strong>
+                        <span style={{ color: 'var(--text-secondary)' }}>{isAnyFieldFilled ? 'Expected Form Value:' : 'TTB Requirement:'}</span> <strong>{verificationResult.brandName.expected}</strong>
                         <span style={{ margin: '0 8px', opacity: 0.5 }}>|</span>
-                        <span style={{ color: 'var(--text-secondary)' }}>Label:</span> <strong>{verificationResult.brandName.actual}</strong>
+                        <span style={{ color: 'var(--text-secondary)' }}>{isAnyFieldFilled ? 'Label Artwork Value:' : 'Detected Artwork Value:'}</span> <strong>{verificationResult.brandName.actual}</strong>
                         <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginTop: '2px' }}>{verificationResult.brandName.message}</p>
                       </div>
                     </div>
@@ -1008,9 +1008,9 @@ export default function App() {
                         <span className={`text-${verificationResult.classType.status.toLowerCase()}`}>{verificationResult.classType.status}</span>
                       </div>
                       <div className="result-details-col">
-                        <span style={{ color: 'var(--text-secondary)' }}>Expected:</span> <strong>{verificationResult.classType.expected}</strong>
+                        <span style={{ color: 'var(--text-secondary)' }}>{isAnyFieldFilled ? 'Expected Form Value:' : 'TTB Requirement:'}</span> <strong>{verificationResult.classType.expected}</strong>
                         <span style={{ margin: '0 8px', opacity: 0.5 }}>|</span>
-                        <span style={{ color: 'var(--text-secondary)' }}>Label:</span> <strong>{verificationResult.classType.actual}</strong>
+                        <span style={{ color: 'var(--text-secondary)' }}>{isAnyFieldFilled ? 'Label Artwork Value:' : 'Detected Artwork Value:'}</span> <strong>{verificationResult.classType.actual}</strong>
                         <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginTop: '2px' }}>{verificationResult.classType.message}</p>
                       </div>
                     </div>
@@ -1023,9 +1023,9 @@ export default function App() {
                         <span className={`text-${verificationResult.abv.status.toLowerCase()}`}>{verificationResult.abv.status}</span>
                       </div>
                       <div className="result-details-col">
-                        <span style={{ color: 'var(--text-secondary)' }}>Expected:</span> <strong>{verificationResult.abv.expected}</strong>
+                        <span style={{ color: 'var(--text-secondary)' }}>{isAnyFieldFilled ? 'Expected Form Value:' : 'TTB Requirement:'}</span> <strong>{verificationResult.abv.expected}</strong>
                         <span style={{ margin: '0 8px', opacity: 0.5 }}>|</span>
-                        <span style={{ color: 'var(--text-secondary)' }}>Label:</span> <strong>{verificationResult.abv.actual}</strong>
+                        <span style={{ color: 'var(--text-secondary)' }}>{isAnyFieldFilled ? 'Label Artwork Value:' : 'Detected Artwork Value:'}</span> <strong>{verificationResult.abv.actual}</strong>
                         <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginTop: '2px' }}>{verificationResult.abv.message}</p>
                       </div>
                     </div>
@@ -1038,9 +1038,9 @@ export default function App() {
                         <span className={`text-${verificationResult.volume.status.toLowerCase()}`}>{verificationResult.volume.status}</span>
                       </div>
                       <div className="result-details-col">
-                        <span style={{ color: 'var(--text-secondary)' }}>Expected:</span> <strong>{verificationResult.volume.expected}</strong>
+                        <span style={{ color: 'var(--text-secondary)' }}>{isAnyFieldFilled ? 'Expected Form Value:' : 'TTB Requirement:'}</span> <strong>{verificationResult.volume.expected}</strong>
                         <span style={{ margin: '0 8px', opacity: 0.5 }}>|</span>
-                        <span style={{ color: 'var(--text-secondary)' }}>Label:</span> <strong>{verificationResult.volume.actual}</strong>
+                        <span style={{ color: 'var(--text-secondary)' }}>{isAnyFieldFilled ? 'Label Artwork Value:' : 'Detected Artwork Value:'}</span> <strong>{verificationResult.volume.actual}</strong>
                         <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginTop: '2px' }}>{verificationResult.volume.message}</p>
                       </div>
                     </div>
@@ -1053,9 +1053,9 @@ export default function App() {
                         <span className={`text-${verificationResult.producer.status.toLowerCase()}`}>{verificationResult.producer.status}</span>
                       </div>
                       <div className="result-details-col">
-                        <span style={{ color: 'var(--text-secondary)' }}>Expected:</span> <strong>{verificationResult.producer.expected}</strong>
+                        <span style={{ color: 'var(--text-secondary)' }}>{isAnyFieldFilled ? 'Expected Form Value:' : 'TTB Requirement:'}</span> <strong>{verificationResult.producer.expected}</strong>
                         <span style={{ margin: '0 8px', opacity: 0.5 }}>|</span>
-                        <span style={{ color: 'var(--text-secondary)' }}>Label:</span> <strong>{verificationResult.producer.actual}</strong>
+                        <span style={{ color: 'var(--text-secondary)' }}>{isAnyFieldFilled ? 'Label Artwork Value:' : 'Detected Artwork Value:'}</span> <strong>{verificationResult.producer.actual}</strong>
                         <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginTop: '2px' }}>{verificationResult.producer.message}</p>
                       </div>
                     </div>
@@ -1068,9 +1068,9 @@ export default function App() {
                         <span className={`text-${verificationResult.countryOfOrigin.status.toLowerCase()}`}>{verificationResult.countryOfOrigin.status}</span>
                       </div>
                       <div className="result-details-col">
-                        <span style={{ color: 'var(--text-secondary)' }}>Expected:</span> <strong>{verificationResult.countryOfOrigin.expected}</strong>
+                        <span style={{ color: 'var(--text-secondary)' }}>{isAnyFieldFilled ? 'Expected Form Value:' : 'TTB Requirement:'}</span> <strong>{verificationResult.countryOfOrigin.expected}</strong>
                         <span style={{ margin: '0 8px', opacity: 0.5 }}>|</span>
-                        <span style={{ color: 'var(--text-secondary)' }}>Label:</span> <strong>{verificationResult.countryOfOrigin.actual}</strong>
+                        <span style={{ color: 'var(--text-secondary)' }}>{isAnyFieldFilled ? 'Label Artwork Value:' : 'Detected Artwork Value:'}</span> <strong>{verificationResult.countryOfOrigin.actual}</strong>
                         <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginTop: '2px' }}>{verificationResult.countryOfOrigin.message}</p>
                       </div>
                     </div>

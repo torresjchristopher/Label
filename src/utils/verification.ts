@@ -231,46 +231,77 @@ export function verifyLabelText(app: ColaApplication, ocrText: string, startTime
   // 5. PRODUCER VERIFICATION
   let producerStatus: FieldVerification['status'] = 'MISMATCH';
   let producerMsg = 'Producer details not found on label.';
+  let detectedProducer = 'Not detected';
   
-  if (fuzzyContains(ocrText, app.producer)) {
+  if (isStandaloneMonitoring) {
+    const producerRegex = /(bottled|distilled|brewed|produced|packed|imported)\s+by\s+([^,\n]+)/i;
+    const prodMatch = normOcrLower.match(producerRegex);
+    if (prodMatch) {
+      producerStatus = 'MATCH';
+      detectedProducer = prodMatch[0];
+      producerMsg = `Standalone Scan: Producer/bottler statement detected ("${detectedProducer}").`;
+    } else {
+      const generalKeywords = ['distillery', 'brewing', 'winery', 'cellars', 'spirits', 'co.', 'ltd'];
+      const foundKeyword = generalKeywords.find(k => normOcrLower.includes(k));
+      if (foundKeyword) {
+        producerStatus = 'MATCH';
+        detectedProducer = `Company keyword "${foundKeyword}" detected`;
+        producerMsg = 'Standalone Scan: Producer company declaration found on label.';
+      } else {
+        producerStatus = 'MISMATCH';
+        producerMsg = 'Standalone Scan: Mandatory producer/bottler statement missing from label.';
+      }
+    }
+  } else if (fuzzyContains(ocrText, app.producer)) {
     producerStatus = 'MATCH';
+    detectedProducer = app.producer;
     producerMsg = 'Producer matches application form.';
   } else {
-    // Check if producer name (first 10 chars) appears
     const shortName = app.producer.split(',')[0];
     if (fuzzyContains(ocrText, shortName)) {
       producerStatus = 'PARTIAL';
+      detectedProducer = shortName;
       producerMsg = 'Producer name matched, but address details may differ or be missing.';
     }
   }
   
   const producerVerification: FieldVerification = {
     status: producerStatus,
-    expected: app.producer,
-    actual: ocrText.match(new RegExp(app.producer.split(',')[0].replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&'), 'i'))?.[0] || 'Not detected',
+    expected: app.producer || 'Mandatory Producer/Bottler',
+    actual: detectedProducer,
     message: producerMsg
   };
 
   // 6. COUNTRY OF ORIGIN VERIFICATION (For Imports)
-  let originStatus: FieldVerification['status'] = 'MATCH'; // Default MATCH if US domestic
+  let originStatus: FieldVerification['status'] = 'MATCH';
   let originMsg = 'Country of origin verified or domestic product.';
-  let detectedOrigin = 'Not applicable (Domestic)';
+  let detectedOrigin = 'Domestic / US Standard';
   
-  if (app.countryOfOrigin.toLowerCase() !== 'united states' && app.countryOfOrigin.toLowerCase() !== 'usa') {
-    originStatus = 'MISMATCH';
-    originMsg = `Imported product. Label must declare country of origin: "${app.countryOfOrigin}"`;
-    detectedOrigin = 'Not detected';
-    
-    if (fuzzyContains(ocrText, app.countryOfOrigin) || normOcrLower.includes(`product of ${app.countryOfOrigin.toLowerCase()}`)) {
+  if (isStandaloneMonitoring) {
+    const originRegex = /(product\s+of|imported\s+from|made\s+in|produced\s+in)\s+([a-z\s]+)/i;
+    const originMatch = normOcrLower.match(originRegex);
+    if (originMatch) {
+      detectedOrigin = originMatch[0].toUpperCase();
       originStatus = 'MATCH';
-      originMsg = `Origin country "${app.countryOfOrigin}" found on label.`;
+      originMsg = `Standalone Scan: Origin statement detected ("${detectedOrigin}").`;
+    } else {
+      originStatus = 'MATCH';
+      originMsg = 'Standalone Scan: Domestic product standard (no import declaration required).';
+    }
+  } else if (app.countryOfOrigin.toLowerCase() !== 'united states' && app.countryOfOrigin.toLowerCase() !== 'usa') {
+    originStatus = 'MISMATCH';
+    originMsg = `Import origin missing or mismatch. Application states ${app.countryOfOrigin}.`;
+    
+    if (fuzzyContains(ocrText, app.countryOfOrigin)) {
+      originStatus = 'MATCH';
       detectedOrigin = app.countryOfOrigin;
+      originMsg = 'Country of origin matches application form.';
     }
   }
   
   const originVerification: FieldVerification = {
     status: originStatus,
-    expected: app.countryOfOrigin,
+    expected: app.countryOfOrigin || 'Origin / Domestic Standard',
     actual: detectedOrigin,
     message: originMsg
   };
