@@ -1,5 +1,4 @@
 import { useState, useEffect, useRef } from 'react';
-import { pipeline } from '@xenova/transformers';
 import {
   ShieldCheck,
   Camera,
@@ -14,8 +13,18 @@ import {
 
 import { STANDARD_GOVERNMENT_WARNING } from './database';
 import { verifyLabelText } from './utils/verification';
-// preprocessCanvasForOcr kept in utils for potential future use with static images
+import {
+  OCR_LOW_CONFIDENCE_THRESHOLD,
+  initOcrPipeline,
+  runOcr,
+} from './utils/ocr';
+import { extractLabelFields } from './utils/labelExtractor';
 import { playPassTone, playFailTone, triggerHapticFeedback } from './utils/audio';
+import {
+  buildVerificationContext,
+  shouldResetContext,
+  withLowConfidenceReason,
+} from './utils/audit';
 import type { ColaApplication, VerificationResult } from './types';
 
 // Preset OCR texts to guarantee high accuracy for demo assets
@@ -85,18 +94,22 @@ export default function App() {
   const [batchStats, setBatchStats] = useState({ approved: 0, rejected: 0, flagged: 0 });
   const [batchLog, setBatchLog] = useState<{ time: string; msg: string }[]>([]);
   const [isProcessingBatch, setIsProcessingBatch] = useState(false);
-  const [batchList, setBatchList] = useState<Array<{ id: number; brand: string; result: string; errors: string[] }>>([]);
+  const [batchList, setBatchList] = useState<
+    Array<{
+      id: number;
+      brand: string;
+      result: string;
+      errors: string[];
+      reasonCodes: string[];
+      contextId: string;
+    }>
+  >([]);
   const [batchFilter, setBatchFilter] = useState<'all' | 'non-compliant' | 'compliant'>('all');
 
   // Mobile viewport detection
   const [isMobile, setIsMobile] = useState(false);
   const [mobileStep, setMobileStep] = useState<'info' | 'scan'>('info');
-  const [lastVerifiedProductKey, setLastVerifiedProductKey] = useState({
-    brand: '',
-    classType: '',
-    abv: '',
-    volume: ''
-  });
+  const [activeVerificationContextId, setActiveVerificationContextId] = useState<string | null>(null);
 
   const lastAudioStatusRef = useRef<string | null>(null);
 
@@ -134,7 +147,7 @@ export default function App() {
     if (isMobile && !cameraActive) {
       startCamera();
     }
-  }, [isMobile]);
+  }, [isMobile, cameraActive]);
 
   // Sync index.css large text mode
   useEffect(() => {
@@ -163,11 +176,9 @@ export default function App() {
       (async () => {
         try {
           console.log("Initializing Transformers.js OCR pipeline for TTB label processing...");
-          const ocrPipe = await pipeline('image-to-text', 'Xenova/trocr-base-printed', {
-            quantized: true,
-            progress_callback: (progress) => console.log(`OCR Model Loading: ${Math.round(progress)}%`)
-          });
-          ocrPipelineRef.current = ocrPipe;
+          ocrPipelineRef.current = await initOcrPipeline(
+            (pct) => console.log(`OCR Model Loading: ${pct}%`)
+          );
           pipelineReady = true;
           console.log("✅ Transformers.js TrOCR pipeline ready");
         } catch (err) {
@@ -193,14 +204,17 @@ export default function App() {
 
             if (ctx) {
               ctx.drawImage(videoRef.current, 0, 0, canvas.width, canvas.height);
-              const imageInput = canvas;
 
-              const ocrResult = await ocrPipelineRef.current(imageInput, {
-                max_new_tokens: 100,
-                num_beams: 2
-              });
-              const text = Array.isArray(ocrResult) ? ocrResult[0]?.generated_text : ocrResult?.generated_text || '';
-              console.log("Live TrOCR raw text for TTB label:", text);
+              // Run multi-pass OCR with confidence gating
+              const ocrResult = await runOcr(canvas, ocrPipelineRef.current);
+              const text = ocrResult.text;
+              if (import.meta.env.DEV) {
+                console.log(
+                  `[Live OCR] pass=${ocrResult.pass} confidence=${ocrResult.confidence.toFixed(
+                    2
+                  )} chars=${text.length}`
+                );
+              }
 
               if (text && text.trim().length > 5) {
                 ocrFrameHistoryRef.current.push(text);
@@ -225,7 +239,15 @@ export default function App() {
                 };
 
                 const startTime = Date.now();
-                const report = verifyLabelText(appConfig, combinedOcrText, startTime);
+                const { contextId, contextType } = getCurrentVerificationContext();
+                const baseReport = verifyLabelText(appConfig, combinedOcrText, startTime);
+                const report: VerificationResult = withLowConfidenceReason({
+                  ...baseReport,
+                  extractedFields: extractLabelFields(combinedOcrText),
+                  ocrConfidence: ocrResult.confidence,
+                  contextId,
+                  contextType,
+                }, OCR_LOW_CONFIDENCE_THRESHOLD);
                 setLiveScanResult(report);
                 setVerificationResult(report);
                 setLabelImage(canvas.toDataURL('image/jpeg', 0.85));
@@ -254,7 +276,7 @@ export default function App() {
         clearInterval(liveScanIntervalRef.current);
         liveScanIntervalRef.current = null;
       }
-      // Terminate the persistent worker when camera is closed
+      // Release the OCR pipeline when camera is closed
       if (ocrPipelineRef.current) {
         ocrPipelineRef.current = null;
       }
@@ -317,14 +339,30 @@ export default function App() {
     }
   };
 
+  const getCurrentVerificationContext = () =>
+    buildVerificationContext({
+      brandName: formBrandName,
+      classType: formClassType,
+      abv: formAbv,
+      volume: formVolume,
+      producer: formProducer,
+      countryOfOrigin: formCountryOfOrigin,
+    });
+
   // Real CSV download for batch verification reports
   const handleExportCSV = () => {
     if (batchList.length === 0) return;
-    const csvRows = ['Application ID,Brand Name,Verification Status,Errors'];
+    const csvRows = [
+      'Application ID,Context ID,Brand Name,Verification Status,Failure Reason Codes,Failure Reasons',
+    ];
     batchList.forEach(item => {
+      const escapedContextId = `"${item.contextId.replace(/"/g, '""')}"`;
       const escapedBrand = `"${item.brand.replace(/"/g, '""')}"`;
+      const escapedCodes = `"${item.reasonCodes.join('; ').replace(/"/g, '""')}"`;
       const escapedErrors = `"${item.errors.join('; ').replace(/"/g, '""')}"`;
-      csvRows.push(`${item.id},${escapedBrand},${item.result},${escapedErrors}`);
+      csvRows.push(
+        `${item.id},${escapedContextId},${escapedBrand},${item.result},${escapedCodes},${escapedErrors}`
+      );
     });
     const csvContent = csvRows.join('\n');
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
@@ -340,9 +378,8 @@ export default function App() {
   const runBatchSimulation = (size: number) => {
     if (isProcessingBatch) return;
 
-    const currentKey = `${formBrandName.trim()}||${formClassType.trim()}||${formAbv.trim()}||${formVolume.trim()}`;
-    const lastKey = `${lastVerifiedProductKey.brand.trim()}||${lastVerifiedProductKey.classType.trim()}||${lastVerifiedProductKey.abv.trim()}||${lastVerifiedProductKey.volume.trim()}`;
-    const isSwitch = currentKey !== lastKey;
+    const { contextId } = getCurrentVerificationContext();
+    const isSwitch = shouldResetContext(activeVerificationContextId, contextId);
     const initialListLength = isSwitch ? 0 : batchList.length;
 
     if (isSwitch) {
@@ -351,13 +388,8 @@ export default function App() {
       setBatchSize(0);
       setBatchProcessed(0);
       setBatchLog([]);
-      setLastVerifiedProductKey({
-        brand: formBrandName,
-        classType: formClassType,
-        abv: formAbv,
-        volume: formVolume
-      });
     }
+    setActiveVerificationContextId(contextId);
 
     setIsProcessingBatch(true);
     setBatchSize(prev => (isSwitch ? size : prev + size));
@@ -396,6 +428,7 @@ export default function App() {
         const rand = Math.random();
         let result = '';
         let errors: string[] = [];
+        let reasonCodes: string[] = [];
         const entryId = 102450 + initialListLength + currentProcessed;
         let brandName = `${formBrandName || 'Brand'} #${entryId}`;
 
@@ -406,12 +439,22 @@ export default function App() {
         } else if (rand < 0.90) {
           result = 'Flagged (Manual Review)';
           errors.push('Fuzzy brand name match');
-          if (Math.random() > 0.5) errors.push('Casing discrepancy on Warning header');
+          reasonCodes.push('BRAND_PARTIAL');
+          if (Math.random() > 0.5) {
+            errors.push('Casing discrepancy on Warning header');
+            reasonCodes.push('WARNING_HEADER_CASE');
+          }
           tickFlagged++;
           flaggedCount++;
         } else {
           result = 'Rejected';
-          errors.push(Math.random() > 0.5 ? 'ABV mismatch' : 'Government Warning wording mismatch');
+          if (Math.random() > 0.5) {
+            errors.push('ABV mismatch');
+            reasonCodes.push('ABV_MISMATCH');
+          } else {
+            errors.push('Government Warning wording mismatch');
+            reasonCodes.push('WARNING_TEXT_MISMATCH');
+          }
           tickRejected++;
           rejectedCount++;
         }
@@ -420,11 +463,14 @@ export default function App() {
           id: entryId,
           brand: brandName,
           result,
-          errors
+          errors,
+          reasonCodes,
+          contextId,
         });
 
         if (currentProcessed % 8 === 0 || currentProcessed === size) {
           let logMsg = `[Label #${entryId}] Checked brand "${brandName}" - ${result}`;
+          if (reasonCodes.length > 0) logMsg += ` - Codes: ${reasonCodes.join(', ')}`;
           if (errors.length > 0) logMsg += ` - Reason: ${errors.join(', ')}`;
           logEntries.unshift({
             time: new Date().toLocaleTimeString(),
@@ -475,19 +521,10 @@ export default function App() {
       }
     }
   };
-  const stopCamera = () => {
-    setCameraActive(false);
-    if (videoRef.current && videoRef.current.srcObject) {
-      const stream = videoRef.current.srcObject as MediaStream;
-      stream.getTracks().forEach(track => track.stop());
-      videoRef.current.srcObject = null;
-    }
-  };
 
   const accumulateVerificationReport = (report: VerificationResult) => {
-    const currentKey = `${formBrandName.trim()}||${formClassType.trim()}||${formAbv.trim()}||${formVolume.trim()}`;
-    const lastKey = `${lastVerifiedProductKey.brand.trim()}||${lastVerifiedProductKey.classType.trim()}||${lastVerifiedProductKey.abv.trim()}||${lastVerifiedProductKey.volume.trim()}`;
-    const isSwitch = currentKey !== lastKey;
+    const { contextId } = getCurrentVerificationContext();
+    const isSwitch = shouldResetContext(activeVerificationContextId, contextId);
     const initialListLength = isSwitch ? 0 : batchList.length;
 
     if (isSwitch) {
@@ -496,74 +533,38 @@ export default function App() {
       setBatchSize(0);
       setBatchProcessed(0);
       setBatchLog([]);
-      setLastVerifiedProductKey({
-        brand: formBrandName,
-        classType: formClassType,
-        abv: formAbv,
-        volume: formVolume
-      });
     }
+    setActiveVerificationContextId(contextId);
 
     let entryResult = 'Approved (Auto)';
-    const errors: string[] = [];
+    const reasonCodes = [...new Set(report.failureReasons.map(reason => reason.code))];
+    const errors = report.failureReasons.map(reason => reason.message);
+    const criticalCodes = new Set([
+      'BRAND_MISMATCH',
+      'CLASS_TYPE_MISMATCH',
+      'ABV_MISMATCH',
+      'VOLUME_MISMATCH',
+      'PRODUCER_MISMATCH',
+      'COUNTRY_MISMATCH',
+      'WARNING_MISSING',
+      'WARNING_TEXT_MISMATCH',
+    ]);
 
-    if (!report.overallPassed) {
-      if (report.brandName.status === 'MISMATCH') {
-        errors.push(`Brand Name Mismatch (Form: "${report.brandName.expected}", Label: "${report.brandName.actual}")`);
-      }
-      if (report.classType.status === 'MISMATCH') {
-        errors.push(`Class/Type Mismatch (Form: "${report.classType.expected}", Label: "${report.classType.actual}")`);
-      }
-      if (report.abv.status === 'MISMATCH') {
-        errors.push(`ABV Mismatch (Form: "${report.abv.expected}", Label: "${report.abv.actual}")`);
-      }
-      if (report.volume.status === 'MISMATCH') {
-        errors.push(`Net Contents Mismatch (Form: "${report.volume.expected}", Label: "${report.volume.actual}")`);
-      }
-      if (report.producer.status === 'MISMATCH') {
-        errors.push(`Producer Mismatch (Form: "${report.producer.expected}", Label: "${report.producer.actual}")`);
-      }
-      if (report.countryOfOrigin.status === 'MISMATCH') {
-        errors.push(`Country Mismatch (Form: "${report.countryOfOrigin.expected}", Label: "${report.countryOfOrigin.actual}")`);
-      }
-      if (report.warningStatement.status === 'MISMATCH') {
-        errors.push(`Govt Warning Text Error: ${report.warningStatement.message}`);
-      }
-
-      const hasCriticalMismatch = report.brandName.status === 'MISMATCH' ||
-        report.classType.status === 'MISMATCH' ||
-        report.abv.status === 'MISMATCH' ||
-        report.volume.status === 'MISMATCH' ||
-        report.warningStatement.status === 'MISMATCH';
-
-      if (hasCriticalMismatch) {
-        entryResult = 'Rejected';
-      } else {
-        entryResult = 'Flagged (Manual Review)';
-        if (report.brandName.status === 'PARTIAL') {
-          errors.push(`Fuzzy Brand Match (Form: "${report.brandName.expected}", Label: "${report.brandName.actual}")`);
-        }
-        if (report.warningStatement.status === 'PARTIAL') {
-          errors.push(`Warning Header Casing/Punctuation Error`);
-        }
-      }
+    const hasCriticalMismatch = reasonCodes.some(code => criticalCodes.has(code));
+    if (hasCriticalMismatch || (!report.overallPassed && reasonCodes.length === 0)) {
+      entryResult = 'Rejected';
+    } else if (!report.overallPassed || reasonCodes.length > 0) {
+      entryResult = 'Flagged (Manual Review)';
     }
-
-    report.additionalChecks.forEach(chk => {
-      if (chk.status === 'WARNING') {
-        errors.push(chk.name);
-        if (entryResult === 'Approved (Auto)') {
-          entryResult = 'Flagged (Manual Review)';
-        }
-      }
-    });
 
     const entryId = 102450 + initialListLength + 1;
     const newEntry = {
       id: entryId,
       brand: formBrandName || 'Custom Brand',
       result: entryResult,
-      errors: errors
+      errors,
+      reasonCodes,
+      contextId,
     };
 
     setBatchList(prev => [newEntry, ...(isSwitch ? [] : prev)]);
@@ -578,7 +579,9 @@ export default function App() {
     setBatchSize(prev => (isSwitch ? 1 : prev + 1));
     setBatchProcessed(prev => (isSwitch ? 1 : prev + 1));
 
-    const logMsg = `[Label #${entryId}] Checked brand "${formBrandName || 'Custom Brand'}" - ${entryResult}` + (errors.length > 0 ? ` - Reason: ${errors.join(', ')}` : '');
+    const codesSuffix = reasonCodes.length > 0 ? ` - Codes: ${reasonCodes.join(', ')}` : '';
+    const reasonsSuffix = errors.length > 0 ? ` - Reason: ${errors.join(', ')}` : '';
+    const logMsg = `[Label #${entryId}] Checked brand "${formBrandName || 'Custom Brand'}" - ${entryResult}${codesSuffix}${reasonsSuffix}`;
     setBatchLog(prev => [
       { time: new Date().toLocaleTimeString(), msg: logMsg },
       ...(isSwitch ? [] : prev)
@@ -594,9 +597,8 @@ export default function App() {
     }
     setIsScanning(true);
     setScanProgress(0);
-    setScanProgressText('Initializing local OCR Engine...');
+    setScanProgressText('Initializing AI label scanner...');
     const startTime = Date.now();
-    setScanProgressText('Initializing Transformers.js Computer Vision OCR for TTB Compliance...');
     // Construct a mock ColaApplication object from form inputs to match with verification utility
     const appConfig: ColaApplication = {
       id: 'custom-app',
@@ -612,9 +614,9 @@ export default function App() {
       applicantName: 'Manual Review Applicant',
       submitDate: new Date().toISOString().split('T')[0]
     };
-    setScanProgressText('Initializing Transformers.js Computer Vision OCR for TTB Compliance...');
     try {
       let finalOcrText = '';
+      let ocrConfidence = 1.0;
 
       // Determine if the current image is a preloaded preset
       let presetKey = '';
@@ -638,15 +640,14 @@ export default function App() {
         });
         finalOcrText = PRESET_OCR_TEXTS[presetKey];
       } else {
-        // Normalize uploaded high-res image canvas (max 1600px dimension) for optimal OCR clarity
-        const processedImageSrc = await new Promise<string>((resolve) => {
+        // Build a canvas from the uploaded image (cap at 2000px for browser memory)
+        const sourceCanvas = await new Promise<HTMLCanvasElement>((resolve) => {
           const img = new Image();
           img.crossOrigin = 'anonymous';
           img.onload = () => {
             const canvas = document.createElement('canvas');
             let width = img.width;
             let height = img.height;
-            // Cap at 2000px max dimension to prevent browser memory issues
             const maxDim = 2000;
             if (width > maxDim || height > maxDim) {
               if (width > height) {
@@ -660,35 +661,55 @@ export default function App() {
             canvas.width = width;
             canvas.height = height;
             const ctx = canvas.getContext('2d');
-            if (ctx) {
-              ctx.drawImage(img, 0, 0, width, height);
-              // Pass raw image as lossless PNG — let Tesseract handle its own binarization
-              resolve(canvas.toDataURL('image/png'));
-            } else {
-              resolve(imageSrc);
-            }
+            if (ctx) ctx.drawImage(img, 0, 0, width, height);
+            resolve(canvas);
           };
-          img.onerror = () => resolve(imageSrc);
+          img.onerror = () => {
+            const fallback = document.createElement('canvas');
+            resolve(fallback);
+          };
           img.src = imageSrc;
         });
-        // Direct local client-side Transformers.js TrOCR 
+
+        setScanProgressText('Running multi-pass Transformer.js OCR...');
+        setScanProgress(20);
+
+        // Initialise pipeline if not already loaded (e.g. file upload without camera)
         if (!ocrPipelineRef.current) {
-          ocrPipelineRef.current = await pipeline('image-to-text', 'Xenova/trocr-base-printed', { quantized: true });
+          ocrPipelineRef.current = await initOcrPipeline(
+            (pct) => setScanProgress(20 + Math.round(pct * 0.5))
+          );
         }
 
-        const img = new Image();
-        img.src = processedImageSrc;
-        await new Promise((res) => { img.onload = res; });
+        setScanProgress(70);
+        setScanProgressText('Applying confidence-gated OCR passes...');
 
-        const ocrResult = await ocrPipelineRef.current(img, { max_new_tokens: 150, num_beams: 3 });
-        const text = Array.isArray(ocrResult) ? ocrResult.map(r => r.generated_text).join('\n') : (ocrResult.generated_text || '');
-        console.log("Uploaded File TrOCR Extracted Text:", text);
-        finalOcrText = text;
-        console.log("Uploaded File OCR Extracted Text:", text);
-        finalOcrText = text;
+        // Multi-pass OCR with confidence gating and preprocessing variants
+        const ocrResult = await runOcr(sourceCanvas, ocrPipelineRef.current);
+        finalOcrText = ocrResult.text;
+        ocrConfidence = ocrResult.confidence;
+        if (import.meta.env.DEV) {
+          console.log(
+            `[OCR] final pass=${ocrResult.pass} confidence=${ocrResult.confidence.toFixed(
+              2
+            )} chars=${finalOcrText.length}`
+          );
+        }
+
+        setScanProgress(100);
       }
 
-      const report = verifyLabelText(appConfig, finalOcrText, startTime);
+      setScanProgressText('Extracting structured fields and verifying compliance...');
+      const { contextId, contextType } = getCurrentVerificationContext();
+      const extracted = extractLabelFields(finalOcrText);
+      const baseReport = verifyLabelText(appConfig, finalOcrText, startTime);
+      const report: VerificationResult = withLowConfidenceReason({
+        ...baseReport,
+        extractedFields: extracted,
+        ocrConfidence,
+        contextId,
+        contextType,
+      }, OCR_LOW_CONFIDENCE_THRESHOLD);
       setVerificationResult(report);
       accumulateVerificationReport(report);
 
@@ -701,7 +722,16 @@ export default function App() {
     } catch (error) {
       console.error("OCR Scan Error:", error);
       setScanProgressText("Scan Error. Reverting to fallback rules.");
-      const fallbackReport = verifyLabelText(appConfig, PRESET_OCR_TEXTS['old_tom_bourbon_label.jpg'], startTime);
+      const fallbackText = PRESET_OCR_TEXTS['old_tom_bourbon_label.jpg'];
+      const { contextId, contextType } = getCurrentVerificationContext();
+      const fallbackBase = verifyLabelText(appConfig, fallbackText, startTime);
+      const fallbackReport: VerificationResult = withLowConfidenceReason({
+        ...fallbackBase,
+        extractedFields: extractLabelFields(fallbackText),
+        ocrConfidence: 0,
+        contextId,
+        contextType,
+      }, OCR_LOW_CONFIDENCE_THRESHOLD);
       setVerificationResult(fallbackReport);
       accumulateVerificationReport(fallbackReport);
 
@@ -767,11 +797,7 @@ export default function App() {
 
   const resetDashboard = () => {
     setVerificationResult(null);
-    setBatchList([]);
-    setBatchStats({ approved: 0, rejected: 0, flagged: 0 });
-    setBatchSize(0);
-    setBatchProcessed(0);
-    setBatchLog([]);
+    setLiveScanResult(null);
   };
 
   return (
@@ -1358,6 +1384,11 @@ export default function App() {
                             <div>
                               <span style={{ fontFamily: 'var(--font-mono)', fontSize: '0.75rem', color: 'var(--text-muted)' }}>#{item.id}</span>
                               <strong style={{ marginLeft: '10px' }}>{item.brand}</strong>
+                              {item.reasonCodes.length > 0 && (
+                                <div style={{ color: 'var(--text-secondary)', fontSize: '0.72rem', marginTop: '2px' }}>
+                                  Codes: {item.reasonCodes.join(', ')}
+                                </div>
+                              )}
                               {item.errors.length > 0 && (
                                 <div style={{ color: 'var(--color-error)', fontSize: '0.75rem', marginTop: '2px' }}>
                                   ⚠️ {item.errors.join(', ')}

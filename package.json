@@ -7,13 +7,23 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "oxlint",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test": "vitest run",
+    "test:unit": "vitest run src/__tests__/unit",
+    "test:integration": "vitest run src/__tests__/integration",
+    "test:batch": "vitest run src/__tests__/batch",
+    "test:kpi": "vitest run src/__tests__/kpi",
+    "test:labels": "vitest run src/__tests__/labels",
+    "csp:validate": "node scripts/validate-csp-compat.mjs",
+    "models:download": "node scripts/download-local-model-assets.mjs",
+    "models:validate": "node scripts/validate-local-model-assets.mjs",
+    "quality:all": "npm run lint && npm run build && npm run test:unit && npm run test:integration && npm run test:batch && npm run test:kpi"
   },
   "dependencies": {
+    "@xenova/transformers": "^2.17.2",
     "lucide-react": "^1.23.0",
     "react": "^19.2.7",
-    "react-dom": "^19.2.7",
-    "tesseract.js": "^7.0.0"
+    "react-dom": "^19.2.7"
   },
   "devDependencies": {
     "@types/node": "^24.13.2",
@@ -22,6 +32,10 @@
     "@vitejs/plugin-react": "^6.0.3",
     "oxlint": "^1.71.0",
     "typescript": "~6.0.2",
-    "vite": "^8.1.1"
+    "vite": "^8.1.1",
+    "vitest": "^3.2.4"
+  },
+  "overrides": {
+    "protobufjs": "8.6.5"
   }
 }

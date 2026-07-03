@@ -1,0 +1,23 @@
+{
+  "cases": [
+    {
+      "id": "old-tom-pass",
+      "imagePath": "public/old_tom_bourbon_label.jpg",
+      "expectedStatus": "PASS",
+      "application": {
+        "id": "example-app-1",
+        "applicationNumber": "COLA-EXAMPLE-001",
+        "brandName": "OLD TOM DISTILLERY",
+        "classType": "Kentucky Straight Bourbon Whiskey",
+        "abv": "45% Alc./Vol. (90 Proof)",
+        "volume": "750 mL",
+        "producer": "Old Tom Distillery Co, Frankfort, KY",
+        "countryOfOrigin": "United States",
+        "warningStatement": "GOVERNMENT WARNING: (1) According to the Surgeon General, women should not drink alcoholic beverages during pregnancy because of the risk of birth defects. (2) Consumption of alcoholic beverages impairs your ability to drive a car or operate machinery, and may cause health problems.",
+        "status": "PENDING",
+        "applicantName": "Example",
+        "submitDate": "2026-07-02"
+      }
+    }
+  ]
+}

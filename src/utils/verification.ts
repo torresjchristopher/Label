@@ -1,4 +1,11 @@
-import type { ColaApplication, VerificationResult, FieldVerification, WarningVerification } from '../types';
+import type {
+  AdditionalCheck,
+  ColaApplication,
+  FailureReason,
+  VerificationResult,
+  FieldVerification,
+  WarningVerification,
+} from '../types';
 
 // Helper to normalize strings for comparison (removes punctuation, excess spacing, lowercases)
 function normalize(str: string): string {
@@ -17,8 +24,8 @@ export function normalizeOcrNumbers(str: string): string {
   return str
     .replace(/(\d)\s*[oO](?=\d|\s|%)/g, '$10')
     .replace(/(?<=\s|^)[oO](?=\.\d)/g, '0')
-    .replace(/(?<=\d)l(?=\d|\%|\s)/gi, '1')
-    .replace(/(?<=\d)I(?=\d|\%|\s)/gi, '1');
+    .replace(/(?<=\d)l(?=\d|%|\s)/gi, '1')
+    .replace(/(?<=\d)I(?=\d|%|\s)/gi, '1');
 }
 
 // Helper to check if a string contains another (fuzzy substring)
@@ -43,14 +50,26 @@ function fuzzyContains(haystack: string, needle: string): boolean {
 
 // Helper to build a regex that allows optional punctuation/spacing between words
 function getBrandRegex(brand: string): RegExp {
-  const words = brand.split(/[\s'’\-]+/).filter(w => w.length > 0);
-  const pattern = words.map(w => w.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&')).join("[\\s'’\\-]*");
+  const words = brand.split(/[\s'’-]+/).filter(w => w.length > 0);
+  const pattern = words
+    .map(w => w.replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&'))
+    .join("[\\s'’-]*");
   return new RegExp(pattern, 'i');
+}
+
+function addFailureReason(
+  list: FailureReason[],
+  code: FailureReason['code'],
+  message: string
+) {
+  if (list.some(item => item.code === code)) return;
+  list.push({ code, message });
 }
 
 export function verifyLabelText(app: ColaApplication, ocrText: string, startTime: number): VerificationResult {
   const normOcrLower = normalizeOcrNumbers(ocrText.toLowerCase());
   const isStandaloneMonitoring = !app.brandName.trim() && !app.classType.trim() && !app.abv.trim();
+  const failureReasons: FailureReason[] = [];
   
   // 1. BRAND NAME VERIFICATION
   let brandStatus: FieldVerification['status'] = 'MISMATCH';
@@ -490,7 +509,7 @@ export function verifyLabelText(app: ColaApplication, ocrText: string, startTime
   };
 
   // 7.5 ADDITIONAL TTB COMPLIANCE CHECKS
-  const additionalChecks: Array<{ name: string; status: 'PASS' | 'WARNING' | 'INFO'; message: string }> = [];
+  const additionalChecks: AdditionalCheck[] = [];
   
   // A. Sulfite Declaration Check (For Wine)
   if (app.classType.toLowerCase().includes('wine')) {
@@ -504,6 +523,7 @@ export function verifyLabelText(app: ColaApplication, ocrText: string, startTime
     } else {
       additionalChecks.push({
         name: 'Sulfite Declaration',
+        code: 'SULFITE_DECLARATION_MISSING',
         status: 'WARNING',
         message: 'TTB Compliance Notice: Wine labels require a sulfite declaration (e.g., "Contains Sulfites") if sulfur dioxide is 10 ppm or more.'
       });
@@ -524,6 +544,7 @@ export function verifyLabelText(app: ColaApplication, ocrText: string, startTime
     } else {
       additionalChecks.push({
         name: 'Importer Prefix Designation',
+        code: 'IMPORTER_PREFIX_MISSING',
         status: 'WARNING',
         message: 'TTB Compliance Warning: Imported labels must designate the importer with a prefix (e.g., "Imported by" or "Sole Agent").'
       });
@@ -579,6 +600,55 @@ export function verifyLabelText(app: ColaApplication, ocrText: string, startTime
   
   const complianceScore = Math.max(0, score);
 
+  if (brandVerification.status === 'MISMATCH') {
+    addFailureReason(failureReasons, 'BRAND_MISMATCH', brandVerification.message);
+  } else if (brandVerification.status === 'PARTIAL') {
+    addFailureReason(failureReasons, 'BRAND_PARTIAL', brandVerification.message);
+  }
+
+  if (classVerification.status === 'MISMATCH') {
+    addFailureReason(failureReasons, 'CLASS_TYPE_MISMATCH', classVerification.message);
+  }
+
+  if (abvVerification.status === 'MISMATCH') {
+    addFailureReason(failureReasons, 'ABV_MISMATCH', abvVerification.message);
+  }
+
+  if (volumeVerification.status === 'MISMATCH') {
+    addFailureReason(failureReasons, 'VOLUME_MISMATCH', volumeVerification.message);
+  }
+
+  if (producerVerification.status === 'MISMATCH') {
+    addFailureReason(failureReasons, 'PRODUCER_MISMATCH', producerVerification.message);
+  }
+
+  if (originVerification.status === 'MISMATCH') {
+    addFailureReason(failureReasons, 'COUNTRY_MISMATCH', originVerification.message);
+  }
+
+  if (warningVerification.status === 'MISSING') {
+    addFailureReason(failureReasons, 'WARNING_MISSING', warningVerification.message);
+  }
+  if (warningVerification.status === 'MISMATCH') {
+    addFailureReason(failureReasons, 'WARNING_TEXT_MISMATCH', warningVerification.message);
+  }
+  if (
+    warningErrors.some(err =>
+      /header|casing|colon/i.test(err)
+    )
+  ) {
+    addFailureReason(
+      failureReasons,
+      'WARNING_HEADER_CASE',
+      'Warning header casing/punctuation does not match required format "GOVERNMENT WARNING:".'
+    );
+  }
+
+  additionalChecks.forEach(check => {
+    if (check.status !== 'WARNING' || !check.code) return;
+    addFailureReason(failureReasons, check.code, check.message);
+  });
+
   // 8. OVERALL PASSED DECISION
   const overallPassed = 
     brandVerification.status !== 'MISMATCH' &&
@@ -603,6 +673,7 @@ export function verifyLabelText(app: ColaApplication, ocrText: string, startTime
     ocrRawText: ocrText,
     processingTimeMs,
     additionalChecks,
-    complianceScore
+    complianceScore,
+    failureReasons,
   };
 }

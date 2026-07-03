@@ -1,0 +1,43 @@
+name: Label Image Regression
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: ['main']
+    paths:
+      - 'testdata/label-regression/**'
+      - 'src/__tests__/labels/**'
+      - 'src/utils/verification.ts'
+      - 'src/utils/ocr.ts'
+      - 'scripts/download-local-model-assets.mjs'
+      - 'scripts/validate-local-model-assets.mjs'
+
+jobs:
+  regression:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Download local OCR model assets
+        env:
+          MODEL_ASSET_BASE_URL: ${{ vars.MODEL_ASSET_BASE_URL }}
+        run: npm run models:download
+
+      - name: Validate local model assets
+        run: npm run models:validate
+
+      - name: Run golden label regression suite
+        env:
+          LABEL_REGRESSION_LOCAL_ONLY: 'true'
+        run: npm run test:labels

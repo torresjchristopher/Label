@@ -3,10 +3,6 @@
  * Simulates 100 verification runs to validate the 2-second average
  */
 
-// Import verification logic inline (TypeScript compilation)
-const STANDARD_WARNING = 
-  "GOVERNMENT WARNING: (1) According to the Surgeon General, women should not drink alcoholic beverages during pregnancy because of the risk of birth defects. (2) Consumption of alcoholic beverages impairs your ability to drive a car or operate machinery, and may cause health problems.";
-
 // Simulate verification time based on the complexity analysis
 // The verification.ts file performs:
 // 1. String normalization (0.01-0.05ms)
