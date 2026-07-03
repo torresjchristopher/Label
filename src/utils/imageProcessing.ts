@@ -357,8 +357,6 @@ export function preprocessedCanvasToImage(
   return new Promise((resolve, reject) => {
     const img = new Image();
     img.onload = () => {
-      // decode() (where available) guarantees the bitmap is fully ready,
-      // not just that the `load` event fired.
       if (typeof img.decode === 'function') {
         img.decode().then(() => resolve(img)).catch(() => resolve(img));
       } else {
@@ -368,4 +366,132 @@ export function preprocessedCanvasToImage(
     img.onerror = (err) => reject(err instanceof Error ? err : new Error('Failed to load preprocessed image'));
     img.src = canvas.toDataURL('image/png');
   });
+}
+
+/**
+ * Crop a canvas to the given rectangle and return a new canvas.
+ */
+export function cropCanvas(source: HTMLCanvasElement, x: number, y: number, w: number, h: number): HTMLCanvasElement {
+  const out = document.createElement('canvas');
+  out.width = Math.max(1, Math.round(w));
+  out.height = Math.max(1, Math.round(h));
+  const ctx = out.getContext('2d');
+  if (ctx) ctx.drawImage(source, x, y, w, h, 0, 0, out.width, out.height);
+  return out;
+}
+
+/**
+ * Segment a preprocessed (binary/high-contrast) canvas into text line crops.
+ * Returns an array of canvases (top-to-bottom). Uses horizontal projection
+ * profile on the luminance channel to find candidate text rows.
+ */
+export function segmentTextLines(canvas: HTMLCanvasElement): HTMLCanvasElement[] {
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return [];
+  const w = canvas.width;
+  const h = canvas.height;
+  let imgData: ImageData;
+  try {
+    imgData = ctx.getImageData(0, 0, w, h);
+  } catch {
+    return [];
+  }
+
+  const d = imgData.data;
+  const rowSums = new Float32Array(h);
+  for (let y = 0; y < h; y++) {
+    let sum = 0;
+    for (let x = 0; x < w; x++) {
+      const idx = (y * w + x) * 4;
+      // treat darker pixels as text (value 0 in binary output)
+      const luminance = d[idx];
+      if (luminance < 128) sum += 1;
+    }
+    rowSums[y] = sum;
+  }
+
+  // Smooth rowSums with a small window to merge thin gaps
+  const smooth = new Float32Array(h);
+  const k = 3;
+  for (let y = 0; y < h; y++) {
+    let s = 0;
+    let cnt = 0;
+    for (let dy = -k; dy <= k; dy++) {
+      const ny = y + dy;
+      if (ny >= 0 && ny < h) {
+        s += rowSums[ny];
+        cnt++;
+      }
+    }
+    smooth[y] = s / Math.max(1, cnt);
+  }
+
+  // Threshold: consider a row as text if it has more than 0.5% of width as dark pixels
+  const threshold = Math.max(1, w * 0.005);
+  const regions: Array<{ y1: number; y2: number }> = [];
+  let inRegion = false;
+  let start = 0;
+  for (let y = 0; y < h; y++) {
+    if (smooth[y] >= threshold) {
+      if (!inRegion) {
+        inRegion = true;
+        start = y;
+      }
+    } else {
+      if (inRegion) {
+        inRegion = false;
+        regions.push({ y1: Math.max(0, start - 2), y2: Math.min(h - 1, y + 2) });
+      }
+    }
+  }
+  if (inRegion) regions.push({ y1: Math.max(0, start - 2), y2: h - 1 });
+
+  // Merge very small regions into neighbors
+  const merged: Array<{ y1: number; y2: number }> = [];
+  for (const r of regions) {
+    if (merged.length === 0) merged.push(r);
+    else {
+      const prev = merged[merged.length - 1];
+      const gap = r.y1 - prev.y2;
+      if (gap <= 6) {
+        prev.y2 = r.y2; // merge
+      } else {
+        merged.push(r);
+      }
+    }
+  }
+
+  // Convert regions to bounding boxes with horizontal padding based on detected text width
+  const outCanvases: HTMLCanvasElement[] = [];
+  for (const r of merged) {
+    const y1 = Math.max(0, r.y1 - 2);
+    const y2 = Math.min(h - 1, r.y2 + 2);
+    // compute left/right bounds by scanning columns for dark pixels within y range
+    let left = w, right = 0;
+    for (let y = y1; y <= y2; y++) {
+      for (let x = 0; x < w; x++) {
+        const idx = (y * w + x) * 4;
+        const lum = d[idx];
+        if (lum < 128) {
+          if (x < left) left = x;
+          if (x > right) right = x;
+        }
+      }
+    }
+    if (left > right) {
+      // fallback to full width slice
+      left = 0;
+      right = w - 1;
+    }
+    const pad = Math.round(Math.min(30, (right - left) * 0.1));
+    const x1 = Math.max(0, left - pad);
+    const x2 = Math.min(w - 1, right + pad);
+    const cropW = x2 - x1 + 1;
+    const cropH = y2 - y1 + 1;
+    if (cropW > 8 && cropH > 6) {
+      outCanvases.push(cropCanvas(canvas, x1, y1, cropW, cropH));
+    }
+  }
+
+  return outCanvases;
 }

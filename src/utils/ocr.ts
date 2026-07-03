@@ -11,6 +11,7 @@ import { env as transformersEnv, pipeline } from '@xenova/transformers';
 import {
   createPreprocessingVariants,
   preprocessedCanvasToImage,
+  segmentTextLines,
 } from './imageProcessing';
 
 // ---------------------------------------------------------------------------
@@ -211,20 +212,73 @@ export async function runOcr(
     const cfg = passConfigs[i] ?? passConfigs[passConfigs.length - 1];
 
     try {
-      const imgEl = await preprocessedCanvasToImage(variantCanvas);
-      const timeoutPromise = new Promise<never>((_, reject) =>
-        setTimeout(
-          () => reject(new Error(`OCR pass ${passNum} timed out`)),
-          OCR_PASS_TIMEOUT_MS
-        )
-      );
+      // For large canvases, perform line segmentation and run OCR per-line.
+      // This matches how the trocr model was trained (line-level recognition)
+      // and is much faster than running beam search on the whole image.
+      let text = '';
+      let confidence = 0;
 
-      const text = await Promise.race([
-        runSinglePass(imgEl, pipelineInstance, cfg),
-        timeoutPromise,
-      ]);
+      if (variantCanvas.width > 400 || variantCanvas.height > 200) {
+        // Use segmentation on the preprocessed canvas
+        const lines = segmentTextLines(variantCanvas);
+        if (lines.length > 0) {
+          const perLineTexts: string[] = [];
+          const perLineScores: number[] = [];
 
-      const confidence = estimateOcrConfidence(text);
+          for (const lineCanvas of lines) {
+            try {
+              const lineImg = await preprocessedCanvasToImage(lineCanvas);
+              // fast per-line decode settings
+              const lineCfg = { maxNewTokens: 64, numBeams: 1 };
+              const lineTimeout = new Promise<never>((_, reject) =>
+                setTimeout(() => reject(new Error('Line OCR timed out')), 8000)
+              );
+              const lineText = (await Promise.race([
+                runSinglePass(lineImg, pipelineInstance, lineCfg),
+                lineTimeout,
+              ])) as string;
+              const lineConf = estimateOcrConfidence(lineText);
+              perLineTexts.push(lineText.trim());
+              perLineScores.push(lineConf);
+            } catch (e) {
+              if (import.meta.env.DEV) console.warn('[OCR] line recognition failed', e);
+              perLineTexts.push('');
+              perLineScores.push(0);
+            }
+          }
+
+          // Join non-empty lines
+          text = perLineTexts.filter(Boolean).join('\n');
+          // Weighted average confidence by line length
+          let weightSum = 0;
+          let confSum = 0;
+          for (let li = 0; li < perLineTexts.length; li++) {
+            const l = perLineTexts[li] || '';
+            const w = Math.max(1, l.length);
+            weightSum += w;
+            confSum += (perLineScores[li] || 0) * w;
+          }
+          confidence = weightSum ? confSum / weightSum : 0;
+        }
+      }
+
+      // Fallback: single-pass on whole preprocessed image
+      if (!text) {
+        const imgEl = await preprocessedCanvasToImage(variantCanvas);
+        const timeoutPromise = new Promise<never>((_, reject) =>
+          setTimeout(
+            () => reject(new Error(`OCR pass ${passNum} timed out`)),
+            OCR_PASS_TIMEOUT_MS
+          )
+        );
+
+        text = await Promise.race([
+          runSinglePass(imgEl, pipelineInstance, cfg),
+          timeoutPromise,
+        ]);
+        confidence = estimateOcrConfidence(text);
+      }
+
       if (import.meta.env.DEV) {
         console.log(
           `[OCR] pass ${passNum}: confidence=${confidence.toFixed(2)} len=${text.length}`
@@ -235,7 +289,6 @@ export async function runOcr(
         bestResult = { text, confidence, pass: passNum };
       }
 
-      // Accept early if confidence is good enough
       if (confidence >= OCR_CONFIDENCE_THRESHOLD) {
         break;
       }
