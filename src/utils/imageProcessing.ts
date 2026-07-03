@@ -343,11 +343,29 @@ export function createPreprocessingVariants(
 /**
  * Convert a preprocessed canvas to an HTMLImageElement for use with the
  * TrOCR pipeline (which accepts HTMLImageElement input).
+ *
+ * Loading an image from a data URL is asynchronous — the returned element
+ * must not be handed to the OCR pipeline until it has actually finished
+ * decoding, otherwise the model may run against a blank/zero-dimension
+ * image. This is most likely to bite on large, high-resolution photos
+ * (e.g. studio-lit label photography) where encode/decode takes longer,
+ * so the race is lost far more often than with small demo images.
  */
 export function preprocessedCanvasToImage(
   canvas: HTMLCanvasElement
-): HTMLImageElement {
-  const img = new Image();
-  img.src = canvas.toDataURL('image/png');
-  return img;
+): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => {
+      // decode() (where available) guarantees the bitmap is fully ready,
+      // not just that the `load` event fired.
+      if (typeof img.decode === 'function') {
+        img.decode().then(() => resolve(img)).catch(() => resolve(img));
+      } else {
+        resolve(img);
+      }
+    };
+    img.onerror = (err) => reject(err instanceof Error ? err : new Error('Failed to load preprocessed image'));
+    img.src = canvas.toDataURL('image/png');
+  });
 }

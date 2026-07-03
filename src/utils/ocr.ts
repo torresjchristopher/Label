@@ -208,10 +208,10 @@ export async function runOcr(
   for (let i = 0; i < Math.min(variants.length, MAX_OCR_PASSES); i++) {
     const passNum = i + 1;
     const variantCanvas = variants[i];
-    const imgEl = preprocessedCanvasToImage(variantCanvas);
     const cfg = passConfigs[i] ?? passConfigs[passConfigs.length - 1];
 
     try {
+      const imgEl = await preprocessedCanvasToImage(variantCanvas);
       const timeoutPromise = new Promise<never>((_, reject) =>
         setTimeout(
           () => reject(new Error(`OCR pass ${passNum} timed out`)),
