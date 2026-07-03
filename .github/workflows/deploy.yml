@@ -34,7 +34,10 @@ jobs:
         run: npm install
 
       - name: Build
-        run: npm run build
+        env:
+          MODEL_ASSET_BASE_URL: ${{ vars.MODEL_ASSET_BASE_URL }}
+          VITE_TRANSFORMERS_LOCAL_ONLY: 'true'
+        run: npm run models:download && npm run models:validate && npm run build
 
       - name: Setup Pages
         uses: actions/configure-pages@v4

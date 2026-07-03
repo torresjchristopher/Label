@@ -48,6 +48,29 @@ export interface AdditionalCheck {
   name: string;
   status: 'PASS' | 'WARNING' | 'INFO';
   message: string;
+  code?: FailureReasonCode;
+}
+
+export type VerificationContextType = 'baseline' | 'application';
+
+export type FailureReasonCode =
+  | 'LOW_CONFIDENCE'
+  | 'BRAND_MISMATCH'
+  | 'BRAND_PARTIAL'
+  | 'CLASS_TYPE_MISMATCH'
+  | 'ABV_MISMATCH'
+  | 'VOLUME_MISMATCH'
+  | 'PRODUCER_MISMATCH'
+  | 'COUNTRY_MISMATCH'
+  | 'WARNING_MISSING'
+  | 'WARNING_TEXT_MISMATCH'
+  | 'WARNING_HEADER_CASE'
+  | 'SULFITE_DECLARATION_MISSING'
+  | 'IMPORTER_PREFIX_MISSING';
+
+export interface FailureReason {
+  code: FailureReasonCode;
+  message: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -100,9 +123,11 @@ export interface VerificationResult {
   processingTimeMs: number;
   additionalChecks: AdditionalCheck[];
   complianceScore: number;
+  contextId?: string;
+  contextType?: VerificationContextType;
+  failureReasons: FailureReason[];
   /** Structured fields extracted from OCR text (populated by the scan pipeline). */
   extractedFields?: ExtractedLabelFields;
   /** OCR confidence score from the Transformer.js pipeline pass. */
   ocrConfidence?: number;
 }
-

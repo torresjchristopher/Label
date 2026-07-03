@@ -11,6 +11,10 @@ node_modules
 dist
 dist-ssr
 *.local
+public/models/**
+!public/models/Xenova/
+!public/models/Xenova/trocr-base-printed/
+!public/models/Xenova/trocr-base-printed/.gitkeep
 
 # Editor directories and files
 .vscode/*

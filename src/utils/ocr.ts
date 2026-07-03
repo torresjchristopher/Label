@@ -7,7 +7,7 @@
  * - Multi-pass retry with alternate preprocessing variants
  * - Per-pass timeout to prevent scanner hangs
  */
-import { pipeline } from '@xenova/transformers';
+import { env as transformersEnv, pipeline } from '@xenova/transformers';
 import {
   createPreprocessingVariants,
   preprocessedCanvasToImage,
@@ -31,6 +31,7 @@ export const MAX_OCR_PASSES = 3;
 
 /** Per-pass OCR inference timeout in milliseconds. */
 export const OCR_PASS_TIMEOUT_MS = 30_000;
+const TROCR_MODEL_ID = 'Xenova/trocr-base-printed';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -55,14 +56,59 @@ export interface OcrResult {
  * to `runOcr()`. Caller is responsible for lifecycle (keep ref, set to null
  * when camera/scanner is closed to allow GC).
  */
+function configureTransformersEnvironment() {
+  const localOnlyFlag = import.meta.env.VITE_TRANSFORMERS_LOCAL_ONLY;
+  // Secure default: production builds are local-only unless explicitly set to "false".
+  const localOnly =
+    localOnlyFlag === 'true' ||
+    (localOnlyFlag !== 'false' && import.meta.env.PROD);
+  const modelBaseUrl = import.meta.env.VITE_TRANSFORMERS_MODEL_BASE_URL?.trim();
+  const localModelPath = `${import.meta.env.BASE_URL}models/`;
+
+  if (modelBaseUrl) {
+    transformersEnv.remoteHost = modelBaseUrl.endsWith('/')
+      ? modelBaseUrl
+      : `${modelBaseUrl}/`;
+  }
+
+  transformersEnv.allowRemoteModels = !localOnly;
+  transformersEnv.allowLocalModels = true;
+
+  if (localOnly) {
+    transformersEnv.localModelPath = localModelPath;
+  }
+
+  return { localOnly, localModelPath };
+}
+
+async function assertLocalModelAssetsAvailable(localModelPath: string) {
+  const configUrl = `${localModelPath}${TROCR_MODEL_ID}/config.json`;
+  const res = await fetch(configUrl, { method: 'GET', cache: 'no-store' });
+  if (!res.ok) {
+    throw new Error(
+      `Local-only OCR is enabled, but model assets were not found at ${configUrl}. ` +
+        'Provide local model files under public/models/ or set an approved internal mirror.'
+    );
+  }
+}
+
 export async function initOcrPipeline(
   onProgress?: (pct: number) => void
 ): Promise<ReturnType<typeof pipeline>> {
-  return pipeline('image-to-text', 'Xenova/trocr-base-printed', {
+  const { localOnly, localModelPath } = configureTransformersEnvironment();
+  if (localOnly) {
+    await assertLocalModelAssetsAvailable(localModelPath);
+  }
+
+  return pipeline('image-to-text', TROCR_MODEL_ID, {
     // quantized: trades ~5-10% accuracy for ~4× smaller model size (~40 MB vs ~175 MB).
     // For compliance use cases needing maximum accuracy, set to false (requires more bandwidth
     // and memory, and increases first-load time).
     quantized: true,
+    local_files_only:
+      import.meta.env.VITE_TRANSFORMERS_LOCAL_ONLY === 'true' ||
+      (import.meta.env.VITE_TRANSFORMERS_LOCAL_ONLY !== 'false' &&
+        import.meta.env.PROD),
     progress_callback: onProgress
       ? (p: number) => onProgress(Math.round(p))
       : undefined,
@@ -179,9 +225,11 @@ export async function runOcr(
       ]);
 
       const confidence = estimateOcrConfidence(text);
-      console.log(
-        `[OCR] pass ${passNum}: confidence=${confidence.toFixed(2)} len=${text.length}`
-      );
+      if (import.meta.env.DEV) {
+        console.log(
+          `[OCR] pass ${passNum}: confidence=${confidence.toFixed(2)} len=${text.length}`
+        );
+      }
 
       if (confidence > bestResult.confidence) {
         bestResult = { text, confidence, pass: passNum };
@@ -192,7 +240,9 @@ export async function runOcr(
         break;
       }
     } catch (err) {
-      console.warn(`[OCR] pass ${passNum} failed:`, err);
+      if (import.meta.env.DEV) {
+        console.warn(`[OCR] pass ${passNum} failed:`, err);
+      }
     }
   }
 
