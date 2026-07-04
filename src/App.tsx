@@ -787,8 +787,8 @@ export default function App() {
       <header>
         <div className="logo-section">
           <div>
-            <h1 className="logo-title">Label Guard</h1>
-            <p style={{ opacity: 0.7, fontSize: '0.8rem', marginTop: '-2px' }}>TTB Compliance Engine</p>
+            <h1 className="logo-title">AI-Powered Alcohol Label Verification App</h1>
+            <p style={{ opacity: 0.7, fontSize: '0.8rem', marginTop: '-2px' }}>TTB review support for rapid label screening and batch intake</p>
           </div>
         </div>
 
@@ -826,7 +826,7 @@ export default function App() {
             {(!isMobile || mobileStep === 'info') && (
               <div className="workspace-panel">
                 <div className="panel-header">
-                  <h4>Application Form Fields</h4>
+                  <h4>TTB Application Form Fields</h4>
                 </div>
                 <div className="panel-body">
                   <div className="form-vertical-stack">
@@ -881,7 +881,7 @@ export default function App() {
                       />
                     </div>
                     <div className="form-group-horizontal">
-                      <label className="form-label">Country of Origin</label>
+                      <label className="form-label">Country of Origin (imports)</label>
                       <input
                         type="text"
                         className="db-search-input"
@@ -1008,7 +1008,7 @@ export default function App() {
                         <div className="text-center opacity-50 p-4">
                           <UploadCloud size={48} className="upload-icon" style={{ marginBottom: '10px' }} />
                           <p style={{ fontSize: '0.95rem' }}>No Label Image Loaded.</p>
-                          <p style={{ fontSize: '0.8rem' }}>Upload file(s) or activate camera.</p>
+                          <p style={{ fontSize: '0.8rem' }}>Upload one label or a batch of labels, or activate the camera.</p>
                         </div>
                       )
                     )}
@@ -1042,7 +1042,7 @@ export default function App() {
                       title={!isScanEligible ? "Fill all 6 fields or clear all fields to enable compliance verification" : "Verify TTB Compliance"}
                     >
                       <Sparkles size={20} />
-                      <span>Verify TTB Compliance</span>
+                      <span>Verify TTB Label</span>
                     </button>
                   </div>
                 </div>
@@ -1056,7 +1056,7 @@ export default function App() {
               <div className="flex-row align-center">
                 <ShieldCheck size={24} style={{ color: verificationResult ? (verificationResult.overallPassed ? 'var(--color-success)' : 'var(--color-error)') : 'var(--accent-gold)' }} />
                 <div>
-                  <h3 style={{ fontSize: '1.25rem' }}>AI Verification & Batch Compliance Dashboard</h3>
+                  <h3 style={{ fontSize: '1.25rem' }}>AI Verification Dashboard</h3>
                   {verificationResult && (
                     <p className="opacity-50" style={{ fontSize: '0.8rem' }}>
                       Compliance report compiled locally in {verificationResult.processingTimeMs}ms

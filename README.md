@@ -1,6 +1,6 @@
-# Label Guard AI - Alcohol Label Compliance Verification
+# AI-Powered Alcohol Label Verification App
 
-Label Guard is a browser-based alcohol label verification tool for TTB-style workflows. It identifies, normalizes, and compares label text against compliance requirements and, when full form data is provided, against application values.
+This browser-based tool supports TTB-style alcohol label review workflows. It identifies, normalizes, and compares label text against compliance requirements and, when full form data is provided, against application values.
 
 The current implementation is **Transformer.js-first** (`@xenova/transformers`, TrOCR) with multi-pass image preprocessing, confidence gating, structured field extraction, and rule-based compliance checks.
 
@@ -119,15 +119,15 @@ npm run models:validate
 | Metric | Current value | Source |
 |---|---:|---|
 | Live camera scan cadence | 1 scan every **3.0 s** | `setInterval(..., 3000)` in `App.tsx` |
-| Batch simulation processing rate | Up to **6 labels / 100 ms** (~60 labels/s) | `runBatchSimulation` loop in `App.tsx` |
-| Simulated 200-label batch time | ~**3.4 s** (ceiling(200/6) * 100ms) | Derived from batch loop |
+| Batch upload processing rate | Depends on device/OCR throughput and the number of uploaded labels | `processBatchUploads` in `App.tsx` |
+| Batch intake support | Multi-file upload flow for importer-style label batches | `handleFileChange` in `App.tsx` |
 | OCR max retry passes | **3** | `MAX_OCR_PASSES` in `ocr.ts` |
 | OCR per-pass timeout | **30 s** | `OCR_PASS_TIMEOUT_MS` in `ocr.ts` |
 | OCR accept confidence threshold | **0.6** | `OCR_CONFIDENCE_THRESHOLD` in `ocr.ts` |
 | OCR low-confidence threshold | **0.2** | `OCR_LOW_CONFIDENCE_THRESHOLD` in `ocr.ts` |
 
 ### Important interpretation note
-- Batch timing above reflects the **simulated intake pipeline** used for dashboard throughput UX.
+- Batch timing above reflects the **multi-file intake flow** used for dashboard throughput UX.
 - It is **not** the same as real end-to-end OCR timing for 200 real images.
 - Real-world latency/accuracy KPIs should be produced from CI benchmark jobs over golden datasets.
 
@@ -196,7 +196,7 @@ Deployment also enforces local-only model presence by running `npm run models:va
 
 ```text
 src/
-  App.tsx                    # Main UI, scanner flow, dashboard, batch simulation
+  App.tsx                    # Main UI, scanner flow, dashboard, and batch uploads
   types.ts                   # Shared interfaces and verification result types
   database.ts                # Demo application data and canonical warning text
   utils/
