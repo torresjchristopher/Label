@@ -220,126 +220,16 @@ export default function App() {
 
   // Live viewfinder automatic real-time rolling snapshot scanner
   const [liveScanResult, setLiveScanResult] = useState<VerificationResult | null>(null);
-  const [isLiveScanningFrame, setIsLiveScanningFrame] = useState(false);
   const liveScanIntervalRef = useRef<any>(null);
   const ocrFrameHistoryRef = useRef<string[]>([]);
   const ocrPipelineRef = useRef<any>(null);
 
   useEffect(() => {
-    if (cameraActive) {
-      ocrFrameHistoryRef.current = [];
-
-      // Initialize Transformers.js OCR pipeline (TrOCR for label text extraction)
-      let pipelineReady = false;
-      setOcrPipelineStatus('loading');
-      (async () => {
-        try {
-          console.log("Initializing Transformers.js OCR pipeline for TTB label processing...");
-          ocrPipelineRef.current = await initOcrPipeline(
-            (pct) => console.log(`OCR Model Loading: ${pct}%`)
-          );
-          pipelineReady = true;
-          setOcrPipelineStatus('ready');
-          console.log("✅ Transformers.js TrOCR pipeline ready");
-        } catch (err) {
-          console.error("Failed to initialize TrOCR pipeline:", err);
-          setOcrPipelineStatus('failed');
-        }
-      })();
-
-      liveScanIntervalRef.current = setInterval(async () => {
-        if (!pipelineReady || !ocrPipelineRef.current) return;
-        if (isLiveScanningFrame || isScanning) return;
-
-        if (videoRef.current && videoRef.current.readyState === 4) {
-          setIsLiveScanningFrame(true);
-          try {
-            // Capture frame and scale to max 1024px wide for practical OCR
-            const vWidth = videoRef.current.videoWidth || 1280;
-            const vHeight = videoRef.current.videoHeight || 720;
-            const scale = Math.min(1, 1024 / vWidth);
-            const canvas = document.createElement('canvas');
-            canvas.width = Math.round(vWidth * scale);
-            canvas.height = Math.round(vHeight * scale);
-            const ctx = canvas.getContext('2d');
-
-            if (ctx) {
-              ctx.drawImage(videoRef.current, 0, 0, canvas.width, canvas.height);
-
-              // Run multi-pass OCR with confidence gating
-              const ocrResult = await runOcr(canvas, ocrPipelineRef.current);
-              const text = ocrResult.text;
-              if (import.meta.env.DEV) {
-                console.log(
-                  `[Live OCR] pass=${ocrResult.pass} confidence=${ocrResult.confidence.toFixed(
-                    2
-                  )} chars=${text.length}`
-                );
-              }
-
-              if (text && text.trim().length > 5) {
-                ocrFrameHistoryRef.current.push(text);
-                if (ocrFrameHistoryRef.current.length > 3) {
-                  ocrFrameHistoryRef.current.shift();
-                }
-                const combinedOcrText = ocrFrameHistoryRef.current.join('\n');
-
-                const appConfig: ColaApplication = {
-                  id: 'custom-app',
-                  applicationNumber: 'COLA-CUSTOM-INPUT',
-                  brandName: formBrandName,
-                  classType: formClassType,
-                  abv: formAbv,
-                  volume: formVolume,
-                  producer: formProducer,
-                  countryOfOrigin: formCountryOfOrigin,
-                  warningStatement: STANDARD_GOVERNMENT_WARNING,
-                  status: 'PENDING',
-                  applicantName: 'Manual Review Applicant',
-                  submitDate: new Date().toISOString().split('T')[0]
-                };
-
-                const startTime = Date.now();
-                const { contextId, contextType } = getCurrentVerificationContext();
-                const baseReport = verifyLabelText(appConfig, combinedOcrText, startTime);
-                const report: VerificationResult = withLowConfidenceReason({
-                  ...baseReport,
-                  extractedFields: extractLabelFields(combinedOcrText),
-                  ocrConfidence: ocrResult.confidence,
-                  contextId,
-                  contextType,
-                }, OCR_LOW_CONFIDENCE_THRESHOLD);
-                setLiveScanResult(report);
-                setVerificationResult(report);
-                setLabelImage(canvas.toDataURL('image/jpeg', 0.85));
-                setActiveUploadLabel('Live camera preview');
-                recordScanSummary(report, 'Live camera preview', { isBatch: false });
-
-                const currentStatus = report.overallPassed ? 'PASS' : 'FAIL';
-                if (lastAudioStatusRef.current !== currentStatus) {
-                  lastAudioStatusRef.current = currentStatus;
-                  accumulateVerificationReport(report);
-                  if (soundEnabled) {
-                    if (report.overallPassed) playPassTone();
-                    else playFailTone();
-                  }
-                  triggerHapticFeedback(report.overallPassed);
-                }
-              }
-            }
-          } catch (err) {
-            console.error("Live scan error:", err);
-          } finally {
-            setIsLiveScanningFrame(false);
-          }
-        }
-      }, 3000);
-    } else {
+    if (!cameraActive) {
       if (liveScanIntervalRef.current) {
         clearInterval(liveScanIntervalRef.current);
         liveScanIntervalRef.current = null;
       }
-      // Release the OCR pipeline when camera is closed
       if (ocrPipelineRef.current) {
         ocrPipelineRef.current = null;
       }
@@ -347,7 +237,13 @@ export default function App() {
       lastAudioStatusRef.current = null;
       setOcrPipelineStatus('idle');
       ocrFrameHistoryRef.current = [];
+      return;
     }
+
+    ocrFrameHistoryRef.current = [];
+    setOcrPipelineStatus('idle');
+    setLiveScanResult(null);
+    setScanProgressText('Camera ready. Upload a label or tap Verify to run a fast review.');
 
     return () => {
       if (liveScanIntervalRef.current) {
@@ -357,7 +253,7 @@ export default function App() {
         ocrPipelineRef.current = null;
       }
     };
-  }, [cameraActive, formBrandName, formClassType, formAbv, formVolume, formProducer, formCountryOfOrigin, isLiveScanningFrame, isScanning, soundEnabled]);
+  }, [cameraActive]);
 
   // Export current form fields to a JSON text file for pre-fill
   const handleExportPrefill = () => {
@@ -605,6 +501,14 @@ export default function App() {
     });
   };
 
+  const getPresetOcrText = (imageSrc: string | null) => {
+    if (!imageSrc) return null;
+    if (imageSrc.includes('old_tom')) return PRESET_OCR_TEXTS['old_tom_bourbon_label.jpg'];
+    if (imageSrc.includes('stones_throw')) return PRESET_OCR_TEXTS['stones_throw_beer_label.jpg'];
+    if (imageSrc.includes('chateau_bordeaux')) return PRESET_OCR_TEXTS['chateau_bordeaux_label.jpg'];
+    return null;
+  };
+
   // Trigger TTB compliance scan with specific image source
   const runComplianceCheckWithImage = async (
     imageSrc: string | null,
@@ -630,6 +534,7 @@ export default function App() {
     }
     const startTime = Date.now();
     let report: VerificationResult | null = null;
+    const presetText = getPresetOcrText(imageSrc);
     // Construct a mock ColaApplication object from form inputs to match with verification utility
     const appConfig: ColaApplication = {
       id: 'custom-app',
@@ -649,29 +554,12 @@ export default function App() {
       let finalOcrText = '';
       let ocrConfidence = 1.0;
 
-      // Determine if the current image is a preloaded preset
-      let presetKey = '';
-      if (imageSrc.includes('old_tom')) presetKey = 'old_tom_bourbon_label.jpg';
-      else if (imageSrc.includes('stones_throw')) presetKey = 'stones_throw_beer_label.jpg';
-      else if (imageSrc.includes('chateau_bordeaux')) presetKey = 'chateau_bordeaux_label.jpg';
-
-      if (presetKey && PRESET_OCR_TEXTS[presetKey]) {
-        // Run simulated timer representing fast local analysis
+      if (presetText) {
         if (!options?.isBatch) {
-          await new Promise((resolve) => {
-            let progress = 0;
-            const interval = setInterval(() => {
-              progress += 25;
-              setScanProgress(progress);
-              setScanProgressText(`Analyzing Image Pixels: ${progress}%`);
-              if (progress >= 100) {
-                clearInterval(interval);
-                resolve(null);
-              }
-            }, 300);
-          });
+          setScanProgressText('Using the built-in sample review for this label.');
+          setScanProgress(100);
         }
-        finalOcrText = PRESET_OCR_TEXTS[presetKey];
+        finalOcrText = presetText;
       } else {
         // Build a canvas from the uploaded image (cap at 2000px for browser memory)
         const sourceCanvas = await new Promise<HTMLCanvasElement>((resolve) => {
@@ -705,36 +593,51 @@ export default function App() {
         });
 
         if (!options?.isBatch) {
-          setScanProgressText('Running multi-pass Transformer.js OCR...');
+          setScanProgressText('Preparing a fast review of your uploaded label...');
           setScanProgress(20);
         }
 
-        // Initialise pipeline if not already loaded (e.g. file upload without camera)
-        if (!ocrPipelineRef.current) {
-          ocrPipelineRef.current = await initOcrPipeline(
-            (pct) => {
-              if (!options?.isBatch) {
-                setScanProgress(20 + Math.round(pct * 0.5));
-              }
+        try {
+          const fastOcrPromise = (async () => {
+            if (!ocrPipelineRef.current) {
+              ocrPipelineRef.current = await initOcrPipeline(
+                (pct) => {
+                  if (!options?.isBatch) {
+                    setScanProgress(20 + Math.round(pct * 0.5));
+                  }
+                }
+              );
             }
-          );
-        }
 
-        if (!options?.isBatch) {
-          setScanProgress(70);
-          setScanProgressText('Applying confidence-gated OCR passes...');
-        }
+            if (!options?.isBatch) {
+              setScanProgress(70);
+              setScanProgressText('Applying a fast OCR pass for the uploaded label...');
+            }
 
-        // Multi-pass OCR with confidence gating and preprocessing variants
-        const ocrResult = await runOcr(sourceCanvas, ocrPipelineRef.current);
-        finalOcrText = ocrResult.text;
-        ocrConfidence = ocrResult.confidence;
-        if (import.meta.env.DEV) {
-          console.log(
-            `[OCR] final pass=${ocrResult.pass} confidence=${ocrResult.confidence.toFixed(
-              2
-            )} chars=${finalOcrText.length}`
-          );
+            return runOcr(sourceCanvas, ocrPipelineRef.current);
+          })();
+
+          const fastOcrTimeout = new Promise<never>((_, reject) => {
+            setTimeout(() => reject(new Error('Fast OCR timed out')), 4000);
+          });
+
+          const ocrResult = await Promise.race([fastOcrPromise, fastOcrTimeout]);
+          finalOcrText = ocrResult.text;
+          ocrConfidence = ocrResult.confidence;
+          if (import.meta.env.DEV) {
+            console.log(
+              `[OCR] final pass=${ocrResult.pass} confidence=${ocrResult.confidence.toFixed(
+                2
+              )} chars=${finalOcrText.length}`
+            );
+          }
+        } catch (ocrError) {
+          console.warn('Fast OCR timed out or failed, using a quick fallback review.', ocrError);
+          finalOcrText = '';
+          ocrConfidence = 0;
+          if (!options?.isBatch) {
+            showUploadFeedback('warning', 'Fast review used', 'The app could not finish OCR in time, so it used a quick fallback review path. The review is still responsive and will flag anything that needs follow-up.');
+          }
         }
 
         if (!options?.isBatch) {
@@ -778,7 +681,7 @@ export default function App() {
       if (!options?.isBatch) {
         setScanProgressText("Scan Error. Reverting to fallback rules.");
       }
-      const fallbackText = PRESET_OCR_TEXTS['old_tom_bourbon_label.jpg'];
+      const fallbackText = presetText ?? '';
       const { contextId, contextType } = getCurrentVerificationContext();
       const fallbackBase = verifyLabelText(appConfig, fallbackText, startTime);
       report = withLowConfidenceReason({
