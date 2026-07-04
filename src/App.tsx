@@ -84,6 +84,20 @@ export default function App() {
   const [isScanning, setIsScanning] = useState(false);
   const [scanProgress, setScanProgress] = useState(0);
   const [scanProgressText, setScanProgressText] = useState('');
+  const [activeUploadLabel, setActiveUploadLabel] = useState('No label selected');
+  const [lastScanSummary, setLastScanSummary] = useState<{
+    label: string;
+    status: 'pass' | 'review' | 'processing';
+    processingTimeMs: number;
+    timestamp: string;
+    mode: string;
+  } | null>(null);
+  const [uploadFeedback, setUploadFeedback] = useState<{
+    type: 'info' | 'success' | 'warning' | 'error';
+    title: string;
+    message: string;
+  } | null>(null);
+  const [ocrPipelineStatus, setOcrPipelineStatus] = useState<'idle' | 'loading' | 'ready' | 'failed'>('idle');
 
   // Mobile Camera States
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -133,6 +147,49 @@ export default function App() {
   );
 
   const isScanEligible = !isAnyFieldFilled || isFormComplete;
+  const dashboardModeLabel = isAnyFieldFilled ? (isFormComplete ? 'Application vs label matching' : 'Complete the form to enable matching') : 'Baseline label monitoring';
+  const lastScanSubtitle = lastScanSummary
+    ? `${lastScanSummary.timestamp} · ${lastScanSummary.processingTimeMs}ms · ${lastScanSummary.mode}`
+    : 'Upload or scan a label to start your review';
+  const readinessTone = isProcessingBatch
+    ? 'info'
+    : isScanning
+      ? 'info'
+      : verificationResult
+        ? (verificationResult.overallPassed ? 'success' : 'warning')
+        : 'info';
+  const readinessTitle = isProcessingBatch
+    ? 'Batch review in progress'
+    : isScanning
+      ? 'Scanning label now'
+      : verificationResult
+        ? (verificationResult.overallPassed ? 'Review complete' : 'Review complete with issues')
+        : 'Ready for review';
+  const readinessMessage = isProcessingBatch
+    ? `Processing ${batchSize || 0} labels with live progress updates.`
+    : isScanning
+      ? scanProgressText || 'Comparing the label artwork with the product details.'
+      : verificationResult
+        ? `Last review checked ${lastScanSummary?.label || 'the current label'} in ${verificationResult.processingTimeMs}ms.`
+        : 'Upload a single label or a batch of labels to begin the review workflow.';
+  const ocrStatusLabel = ocrPipelineStatus === 'ready'
+    ? 'OCR ready'
+    : ocrPipelineStatus === 'loading'
+      ? 'OCR warming up'
+      : ocrPipelineStatus === 'failed'
+        ? 'OCR unavailable'
+        : 'OCR idle';
+  const readinessDetail = `${readinessMessage} System status: ${ocrStatusLabel}.`;
+  const readinessStyles = {
+    info: { background: 'var(--color-info-bg)', border: '1px solid var(--color-info)', color: 'var(--color-info)' },
+    success: { background: 'var(--color-success-bg)', border: '1px solid var(--color-success-border)', color: 'var(--color-success)' },
+    warning: { background: 'var(--color-warning-bg)', border: '1px solid var(--color-warning-border)', color: 'var(--color-warning)' },
+    error: { background: 'var(--color-error-bg)', border: '1px solid var(--color-error-border)', color: 'var(--color-error)' },
+  } as const;
+
+  const showUploadFeedback = (type: 'info' | 'success' | 'warning' | 'error', title: string, message: string) => {
+    setUploadFeedback({ type, title, message });
+  };
 
   useEffect(() => {
     const checkMobile = () => {
@@ -174,6 +231,7 @@ export default function App() {
 
       // Initialize Transformers.js OCR pipeline (TrOCR for label text extraction)
       let pipelineReady = false;
+      setOcrPipelineStatus('loading');
       (async () => {
         try {
           console.log("Initializing Transformers.js OCR pipeline for TTB label processing...");
@@ -181,9 +239,11 @@ export default function App() {
             (pct) => console.log(`OCR Model Loading: ${pct}%`)
           );
           pipelineReady = true;
+          setOcrPipelineStatus('ready');
           console.log("✅ Transformers.js TrOCR pipeline ready");
         } catch (err) {
           console.error("Failed to initialize TrOCR pipeline:", err);
+          setOcrPipelineStatus('failed');
         }
       })();
 
@@ -252,6 +312,8 @@ export default function App() {
                 setLiveScanResult(report);
                 setVerificationResult(report);
                 setLabelImage(canvas.toDataURL('image/jpeg', 0.85));
+                setActiveUploadLabel('Live camera preview');
+                recordScanSummary(report, 'Live camera preview', { isBatch: false });
 
                 const currentStatus = report.overallPassed ? 'PASS' : 'FAIL';
                 if (lastAudioStatusRef.current !== currentStatus) {
@@ -283,6 +345,7 @@ export default function App() {
       }
       setLiveScanResult(null);
       lastAudioStatusRef.current = null;
+      setOcrPipelineStatus('idle');
       ocrFrameHistoryRef.current = [];
     }
 
@@ -387,6 +450,7 @@ export default function App() {
     if (files.length === 0 || isProcessingBatch) return;
 
     const { contextId } = getCurrentVerificationContext();
+    showUploadFeedback('info', 'Batch upload started', `Reviewing ${files.length} labels. Keep this page open while each image is checked.`);
     const isSwitch = shouldResetContext(activeVerificationContextId, contextId);
 
     if (isSwitch) {
@@ -403,6 +467,7 @@ export default function App() {
 
       for (const [index, { file, dataUrl }] of uploadedFiles.entries()) {
         const brandName = formatUploadLabelName(file.name, formBrandName || 'Uploaded label');
+        setActiveUploadLabel(brandName);
         await runComplianceCheckWithImage(dataUrl, {
           isBatch: true,
           batchBrandName: brandName,
@@ -417,8 +482,10 @@ export default function App() {
           stopCamera();
         }
       }
+      showUploadFeedback('success', 'Batch review complete', `${files.length} labels were reviewed. Check the intake summary for the results.`);
     } catch (error) {
       console.error('Batch upload processing failed:', error);
+      showUploadFeedback('error', 'Batch review interrupted', 'The batch could not be completed. Please try again with a smaller set of images.');
       setBatchLog(prev => [
         { time: new Date().toLocaleTimeString(), msg: '⚠️ Batch upload processing failed. Please try again.' },
         ...prev,
@@ -441,9 +508,11 @@ export default function App() {
     }
 
     const file = files[0];
+    showUploadFeedback('info', 'Single upload started', 'Reviewing the label and comparing it to the product information.');
     try {
       const uploadedFiles = await readFilesAsDataUrls([file]);
       const [{ dataUrl }] = uploadedFiles;
+      setActiveUploadLabel(formatUploadLabelName(file.name, formBrandName || 'Uploaded label'));
       setLabelImage(dataUrl);
       stopCamera();
       await runComplianceCheckWithImage(dataUrl, {
@@ -453,7 +522,7 @@ export default function App() {
       });
     } catch (error) {
       console.error('Single upload processing failed:', error);
-      alert('Unable to process the selected image. Please try another file.');
+      showUploadFeedback('error', 'Upload could not be processed', 'The selected image could not be reviewed. Please try another file or use the camera input.');
     }
   };
 
@@ -514,7 +583,7 @@ export default function App() {
       else updated.rejected++;
       return updated;
     });
-    setBatchSize(prev => (isSwitch ? 1 : prev + 1));
+    setBatchSize(prev => (isSwitch ? 1 : prev));
     setBatchProcessed(prev => (isSwitch ? 1 : prev + 1));
 
     const codesSuffix = reasonCodes.length > 0 ? ` - Codes: ${reasonCodes.join(', ')}` : '';
@@ -524,6 +593,16 @@ export default function App() {
       { time: new Date().toLocaleTimeString(), msg: logMsg },
       ...(isSwitch ? [] : prev)
     ]);
+  };
+
+  const recordScanSummary = (report: VerificationResult, uploadLabel: string, options?: { isBatch?: boolean; batchSize?: number }) => {
+    setLastScanSummary({
+      label: uploadLabel,
+      status: report.overallPassed ? 'pass' : 'review',
+      processingTimeMs: report.processingTimeMs,
+      timestamp: new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }),
+      mode: options?.isBatch ? `Batch review · ${options.batchSize ?? batchSize} labels` : dashboardModeLabel,
+    });
   };
 
   // Trigger TTB compliance scan with specific image source
@@ -540,7 +619,7 @@ export default function App() {
   ) => {
     if (!imageSrc) return null;
     if (!isScanEligible) {
-      alert('Form is partially filled. Please complete all 6 fields to run application verification, or clear all fields to run standalone TTB label monitoring.');
+      showUploadFeedback('warning', 'Review blocked by incomplete product details', 'Complete all 6 product fields to run application matching, or clear the form to run standalone TTB label monitoring.');
       return null;
     }
 
@@ -683,6 +762,10 @@ export default function App() {
         brandName: options?.batchBrandName,
         entryId: options?.entryId,
       });
+      recordScanSummary(report, options?.batchBrandName || activeUploadLabel, { isBatch: options?.isBatch, batchSize: options?.batchSize ?? batchSize });
+      if (!options?.isBatch && options?.shouldUpdateMainResult !== false) {
+        showUploadFeedback(report.overallPassed ? 'success' : 'warning', report.overallPassed ? 'Review complete' : 'Review flagged for follow-up', report.overallPassed ? 'The label passed the current compliance checks.' : 'The label needs manual follow-up because one or more checks did not match.');
+      }
 
       if (soundEnabled) {
         if (report.overallPassed) playPassTone();
@@ -712,6 +795,8 @@ export default function App() {
         brandName: options?.batchBrandName,
         entryId: options?.entryId,
       });
+      recordScanSummary(report, options?.batchBrandName || activeUploadLabel, { isBatch: options?.isBatch, batchSize: options?.batchSize ?? batchSize });
+      showUploadFeedback('warning', 'Used fallback review rules', 'The image was not read cleanly, so the app used the built-in reference review to keep the workflow moving.');
 
       if (soundEnabled) {
         if (report.overallPassed) playPassTone();
@@ -1025,6 +1110,13 @@ export default function App() {
                     </div>
                   )}
 
+                  {uploadFeedback && (
+                    <div style={{ padding: '0.9rem 1rem', borderRadius: '8px', display: 'flex', flexDirection: 'column', gap: '0.25rem', ...(readinessStyles[uploadFeedback.type] || readinessStyles.info) }}>
+                      <div style={{ fontWeight: 700, fontSize: '0.95rem' }}>{uploadFeedback.title}</div>
+                      <div style={{ fontSize: '0.85rem', lineHeight: 1.45 }}>{uploadFeedback.message}</div>
+                    </div>
+                  )}
+
                   {/* Partial fill warning message */}
                   {!isScanEligible && (
                     <div style={{ marginTop: '1rem', padding: '0.75rem 1rem', background: 'var(--color-warning-bg)', border: '1px solid var(--color-warning-border)', borderRadius: '4px', fontSize: '0.82rem', color: 'var(--color-warning)', textAlign: 'center' }}>
@@ -1076,6 +1168,16 @@ export default function App() {
                     <span className="score-val">{verificationResult.complianceScore}</span>
                     <span className="score-label">Score</span>
                   </div>
+                </div>
+              )}
+            </div>
+
+            <div style={{ marginBottom: '1.25rem', padding: '0.95rem 1.1rem', borderRadius: '8px', ...readinessStyles[readinessTone] }}>
+              <div style={{ fontSize: '0.95rem', fontWeight: 700 }}>{readinessTitle}</div>
+              <div style={{ fontSize: '0.84rem', marginTop: '0.25rem', lineHeight: 1.5 }}>{readinessDetail}</div>
+              {lastScanSummary && (
+                <div style={{ fontSize: '0.78rem', marginTop: '0.35rem', opacity: 0.9 }}>
+                  {lastScanSubtitle}
                 </div>
               )}
             </div>
