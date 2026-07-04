@@ -25,6 +25,7 @@ import {
   shouldResetContext,
   withLowConfidenceReason,
 } from './utils/audit';
+import { formatUploadLabelName, readFilesAsDataUrls } from './utils/uploads';
 import type { ColaApplication, VerificationResult } from './types';
 
 // Preset OCR texts to guarantee high accuracy for demo assets
@@ -374,155 +375,92 @@ export default function App() {
     URL.revokeObjectURL(url);
   };
 
-  // Unified batch simulation that supports accumulation and isSwitch detection
-  const runBatchSimulation = (size: number) => {
-    if (isProcessingBatch) return;
+  const resetBatchState = () => {
+    setBatchList([]);
+    setBatchStats({ approved: 0, rejected: 0, flagged: 0 });
+    setBatchSize(0);
+    setBatchProcessed(0);
+    setBatchLog([]);
+  };
+
+  const processBatchUploads = async (files: File[]) => {
+    if (files.length === 0 || isProcessingBatch) return;
 
     const { contextId } = getCurrentVerificationContext();
     const isSwitch = shouldResetContext(activeVerificationContextId, contextId);
-    const initialListLength = isSwitch ? 0 : batchList.length;
 
     if (isSwitch) {
-      setBatchList([]);
-      setBatchStats({ approved: 0, rejected: 0, flagged: 0 });
-      setBatchSize(0);
-      setBatchProcessed(0);
-      setBatchLog([]);
+      resetBatchState();
     }
+
     setActiveVerificationContextId(contextId);
-
     setIsProcessingBatch(true);
-    setBatchSize(prev => (isSwitch ? size : prev + size));
+    setBatchSize(files.length);
+    setBatchProcessed(0);
 
-    const startTime = Date.now();
-    let currentProcessed = 0;
-    let approvedCount = 0;
-    let rejectedCount = 0;
-    let flaggedCount = 0;
+    try {
+      const uploadedFiles = await readFilesAsDataUrls(files);
 
-    const logEntries: { time: string; msg: string }[] = [];
-    const listEntries: typeof batchList = [];
-
-    const interval = setInterval(() => {
-      if (currentProcessed >= size) {
-        clearInterval(interval);
-        setIsProcessingBatch(false);
-        const endTime = Date.now();
-        const duration = (endTime - startTime) / 1000;
-
-        setBatchLog(prev => [
-          { time: new Date().toLocaleTimeString(), msg: `🎉 Batch of ${size} completed in ${duration.toFixed(2)} seconds. Average speed: ${(duration * 1000 / size).toFixed(1)}ms per label.` },
-          { time: new Date().toLocaleTimeString(), msg: `✅ Auto-approved: ${approvedCount} | ⚠️ Flagged for review: ${flaggedCount} | ❌ Rejected: ${rejectedCount}` },
-          ...prev
-        ]);
-        return;
-      }
-
-      const processedThisTick = Math.min(6, size - currentProcessed);
-      let tickApproved = 0;
-      let tickFlagged = 0;
-      let tickRejected = 0;
-
-      for (let i = 0; i < processedThisTick; i++) {
-        currentProcessed++;
-        const rand = Math.random();
-        let result = '';
-        let errors: string[] = [];
-        let reasonCodes: string[] = [];
-        const entryId = 102450 + initialListLength + currentProcessed;
-        let brandName = `${formBrandName || 'Brand'} #${entryId}`;
-
-        if (rand < 0.75) {
-          result = 'Approved (Auto)';
-          tickApproved++;
-          approvedCount++;
-        } else if (rand < 0.90) {
-          result = 'Flagged (Manual Review)';
-          errors.push('Fuzzy brand name match');
-          reasonCodes.push('BRAND_PARTIAL');
-          if (Math.random() > 0.5) {
-            errors.push('Casing discrepancy on Warning header');
-            reasonCodes.push('WARNING_HEADER_CASE');
-          }
-          tickFlagged++;
-          flaggedCount++;
-        } else {
-          result = 'Rejected';
-          if (Math.random() > 0.5) {
-            errors.push('ABV mismatch');
-            reasonCodes.push('ABV_MISMATCH');
-          } else {
-            errors.push('Government Warning wording mismatch');
-            reasonCodes.push('WARNING_TEXT_MISMATCH');
-          }
-          tickRejected++;
-          rejectedCount++;
-        }
-
-        listEntries.unshift({
-          id: entryId,
-          brand: brandName,
-          result,
-          errors,
-          reasonCodes,
-          contextId,
+      for (const [index, { file, dataUrl }] of uploadedFiles.entries()) {
+        const brandName = formatUploadLabelName(file.name, formBrandName || 'Uploaded label');
+        await runComplianceCheckWithImage(dataUrl, {
+          isBatch: true,
+          batchBrandName: brandName,
+          batchIndex: index + 1,
+          batchSize: files.length,
+          shouldUpdateMainResult: false,
         });
+        setBatchProcessed(index + 1);
 
-        if (currentProcessed % 8 === 0 || currentProcessed === size) {
-          let logMsg = `[Label #${entryId}] Checked brand "${brandName}" - ${result}`;
-          if (reasonCodes.length > 0) logMsg += ` - Codes: ${reasonCodes.join(', ')}`;
-          if (errors.length > 0) logMsg += ` - Reason: ${errors.join(', ')}`;
-          logEntries.unshift({
-            time: new Date().toLocaleTimeString(),
-            msg: logMsg
-          });
+        if (index === 0) {
+          setLabelImage(dataUrl);
+          stopCamera();
         }
       }
-
-      setBatchProcessed(prev => (isSwitch && prev === batchProcessed ? currentProcessed : prev + processedThisTick));
-      setBatchStats(prev => {
-        if (isSwitch && prev.approved === batchStats.approved) {
-          return {
-            approved: tickApproved,
-            flagged: tickFlagged,
-            rejected: tickRejected
-          };
-        }
-        return {
-          approved: prev.approved + tickApproved,
-          flagged: prev.flagged + tickFlagged,
-          rejected: prev.rejected + tickRejected
-        };
-      });
-      setBatchLog(prev => [...logEntries, ...prev]);
-      setBatchList(prev => [...listEntries, ...prev]);
-
-      logEntries.length = 0;
-      listEntries.length = 0;
-    }, 100);
+    } catch (error) {
+      console.error('Batch upload processing failed:', error);
+      setBatchLog(prev => [
+        { time: new Date().toLocaleTimeString(), msg: '⚠️ Batch upload processing failed. Please try again.' },
+        ...prev,
+      ]);
+    } finally {
+      setIsProcessingBatch(false);
+    }
   };
 
   // Handle local File upload (supports multiple files for auto-batching)
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = e.target.files;
-    if (files && files.length > 0) {
-      if (files.length > 1) {
-        runBatchSimulation(files.length);
-      } else {
-        const file = files[0];
-        const reader = new FileReader();
-        reader.onload = (event) => {
-          const dataUrl = event.target?.result as string;
-          setLabelImage(dataUrl);
-          stopCamera();
-          runComplianceCheckWithImage(dataUrl);
-        };
-        reader.readAsDataURL(file);
-      }
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files ?? []);
+    if (files.length === 0) return;
+
+    e.currentTarget.value = '';
+
+    if (files.length > 1) {
+      await processBatchUploads(files);
+      return;
+    }
+
+    const file = files[0];
+    try {
+      const uploadedFiles = await readFilesAsDataUrls([file]);
+      const [{ dataUrl }] = uploadedFiles;
+      setLabelImage(dataUrl);
+      stopCamera();
+      await runComplianceCheckWithImage(dataUrl, {
+        isBatch: false,
+        batchBrandName: formatUploadLabelName(file.name, formBrandName || 'Uploaded label'),
+        shouldUpdateMainResult: true,
+      });
+    } catch (error) {
+      console.error('Single upload processing failed:', error);
+      alert('Unable to process the selected image. Please try another file.');
     }
   };
 
-  const accumulateVerificationReport = (report: VerificationResult) => {
+  const accumulateVerificationReport = (
+    report: VerificationResult,
+    options?: { brandName?: string; entryId?: number }
+  ) => {
     const { contextId } = getCurrentVerificationContext();
     const isSwitch = shouldResetContext(activeVerificationContextId, contextId);
     const initialListLength = isSwitch ? 0 : batchList.length;
@@ -557,10 +495,10 @@ export default function App() {
       entryResult = 'Flagged (Manual Review)';
     }
 
-    const entryId = 102450 + initialListLength + 1;
+    const entryId = options?.entryId ?? 102450 + initialListLength + 1;
     const newEntry = {
       id: entryId,
-      brand: formBrandName || 'Custom Brand',
+      brand: options?.brandName || formBrandName || 'Custom Brand',
       result: entryResult,
       errors,
       reasonCodes,
@@ -589,16 +527,30 @@ export default function App() {
   };
 
   // Trigger TTB compliance scan with specific image source
-  const runComplianceCheckWithImage = async (imageSrc: string | null) => {
-    if (!imageSrc) return;
+  const runComplianceCheckWithImage = async (
+    imageSrc: string | null,
+    options?: {
+      isBatch?: boolean;
+      batchBrandName?: string;
+      batchIndex?: number;
+      batchSize?: number;
+      shouldUpdateMainResult?: boolean;
+      entryId?: number;
+    }
+  ) => {
+    if (!imageSrc) return null;
     if (!isScanEligible) {
       alert('Form is partially filled. Please complete all 6 fields to run application verification, or clear all fields to run standalone TTB label monitoring.');
-      return;
+      return null;
     }
-    setIsScanning(true);
-    setScanProgress(0);
-    setScanProgressText('Initializing AI label scanner...');
+
+    if (!options?.isBatch) {
+      setIsScanning(true);
+      setScanProgress(0);
+      setScanProgressText('Initializing AI label scanner...');
+    }
     const startTime = Date.now();
+    let report: VerificationResult | null = null;
     // Construct a mock ColaApplication object from form inputs to match with verification utility
     const appConfig: ColaApplication = {
       id: 'custom-app',
@@ -626,18 +578,20 @@ export default function App() {
 
       if (presetKey && PRESET_OCR_TEXTS[presetKey]) {
         // Run simulated timer representing fast local analysis
-        await new Promise((resolve) => {
-          let progress = 0;
-          const interval = setInterval(() => {
-            progress += 25;
-            setScanProgress(progress);
-            setScanProgressText(`Analyzing Image Pixels: ${progress}%`);
-            if (progress >= 100) {
-              clearInterval(interval);
-              resolve(null);
-            }
-          }, 300);
-        });
+        if (!options?.isBatch) {
+          await new Promise((resolve) => {
+            let progress = 0;
+            const interval = setInterval(() => {
+              progress += 25;
+              setScanProgress(progress);
+              setScanProgressText(`Analyzing Image Pixels: ${progress}%`);
+              if (progress >= 100) {
+                clearInterval(interval);
+                resolve(null);
+              }
+            }, 300);
+          });
+        }
         finalOcrText = PRESET_OCR_TEXTS[presetKey];
       } else {
         // Build a canvas from the uploaded image (cap at 2000px for browser memory)
@@ -671,18 +625,26 @@ export default function App() {
           img.src = imageSrc;
         });
 
-        setScanProgressText('Running multi-pass Transformer.js OCR...');
-        setScanProgress(20);
+        if (!options?.isBatch) {
+          setScanProgressText('Running multi-pass Transformer.js OCR...');
+          setScanProgress(20);
+        }
 
         // Initialise pipeline if not already loaded (e.g. file upload without camera)
         if (!ocrPipelineRef.current) {
           ocrPipelineRef.current = await initOcrPipeline(
-            (pct) => setScanProgress(20 + Math.round(pct * 0.5))
+            (pct) => {
+              if (!options?.isBatch) {
+                setScanProgress(20 + Math.round(pct * 0.5));
+              }
+            }
           );
         }
 
-        setScanProgress(70);
-        setScanProgressText('Applying confidence-gated OCR passes...');
+        if (!options?.isBatch) {
+          setScanProgress(70);
+          setScanProgressText('Applying confidence-gated OCR passes...');
+        }
 
         // Multi-pass OCR with confidence gating and preprocessing variants
         const ocrResult = await runOcr(sourceCanvas, ocrPipelineRef.current);
@@ -696,22 +658,31 @@ export default function App() {
           );
         }
 
-        setScanProgress(100);
+        if (!options?.isBatch) {
+          setScanProgress(100);
+        }
       }
 
-      setScanProgressText('Extracting structured fields and verifying compliance...');
+      if (!options?.isBatch) {
+        setScanProgressText('Extracting structured fields and verifying compliance...');
+      }
       const { contextId, contextType } = getCurrentVerificationContext();
       const extracted = extractLabelFields(finalOcrText);
       const baseReport = verifyLabelText(appConfig, finalOcrText, startTime);
-      const report: VerificationResult = withLowConfidenceReason({
+      report = withLowConfidenceReason({
         ...baseReport,
         extractedFields: extracted,
         ocrConfidence,
         contextId,
         contextType,
       }, OCR_LOW_CONFIDENCE_THRESHOLD);
-      setVerificationResult(report);
-      accumulateVerificationReport(report);
+      if (options?.shouldUpdateMainResult !== false) {
+        setVerificationResult(report);
+      }
+      accumulateVerificationReport(report, {
+        brandName: options?.batchBrandName,
+        entryId: options?.entryId,
+      });
 
       if (soundEnabled) {
         if (report.overallPassed) playPassTone();
@@ -721,28 +692,38 @@ export default function App() {
 
     } catch (error) {
       console.error("OCR Scan Error:", error);
-      setScanProgressText("Scan Error. Reverting to fallback rules.");
+      if (!options?.isBatch) {
+        setScanProgressText("Scan Error. Reverting to fallback rules.");
+      }
       const fallbackText = PRESET_OCR_TEXTS['old_tom_bourbon_label.jpg'];
       const { contextId, contextType } = getCurrentVerificationContext();
       const fallbackBase = verifyLabelText(appConfig, fallbackText, startTime);
-      const fallbackReport: VerificationResult = withLowConfidenceReason({
+      report = withLowConfidenceReason({
         ...fallbackBase,
         extractedFields: extractLabelFields(fallbackText),
         ocrConfidence: 0,
         contextId,
         contextType,
       }, OCR_LOW_CONFIDENCE_THRESHOLD);
-      setVerificationResult(fallbackReport);
-      accumulateVerificationReport(fallbackReport);
+      if (options?.shouldUpdateMainResult !== false) {
+        setVerificationResult(report);
+      }
+      accumulateVerificationReport(report, {
+        brandName: options?.batchBrandName,
+        entryId: options?.entryId,
+      });
 
       if (soundEnabled) {
-        if (fallbackReport.overallPassed) playPassTone();
+        if (report.overallPassed) playPassTone();
         else playFailTone();
       }
-      triggerHapticFeedback(fallbackReport.overallPassed);
+      triggerHapticFeedback(report.overallPassed);
     } finally {
-      setIsScanning(false);
+      if (!options?.isBatch) {
+        setIsScanning(false);
+      }
     }
+    return report ?? null;
   };
 
   const handleRunComplianceCheck = async () => {
