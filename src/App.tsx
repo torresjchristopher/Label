@@ -26,39 +26,8 @@ import {
   withLowConfidenceReason,
 } from './utils/audit';
 import { formatUploadLabelName, readFilesAsDataUrls } from './utils/uploads';
+import { getPresetOcrText } from './utils/presetOcr';
 import type { ColaApplication, VerificationResult } from './types';
-
-// Preset OCR texts to guarantee high accuracy for demo assets
-const PRESET_OCR_TEXTS: Record<string, string> = {
-  'old_tom_bourbon_label.jpg': `
-    OLD TOM DISTILLERY
-    Kentucky Straight Bourbon Whiskey
-    45% Alc./Vol. (90 Proof)
-    750 mL
-    Bottled by Old Tom Distillery Co, Frankfort, KY
-    Product of USA
-    GOVERNMENT WARNING: (1) According to the Surgeon General, women should not drink alcoholic beverages during pregnancy because of the risk of birth defects. (2) Consumption of alcoholic beverages impairs your ability to drive a car or operate machinery, and may cause health problems.
-  `,
-  'stones_throw_beer_label.jpg': `
-    STONE'S THROW BREWING
-    India Pale Ale (IPA)
-    6.8% Alc./Vol.
-    12 FL. OZ.
-    Brewed and bottled by Stone's Throw Brewing Co, Seattle, WA
-    Product of USA
-    Government Warning: (1) According to the Surgeon General, women should not drink alcoholic beverages during pregnancy. (2) Consumption of alcoholic beverages impairs your ability to drive a car or operate machinery.
-  `,
-  'chateau_bordeaux_label.jpg': `
-    CHATEAU BORDEAUX
-    Appellation Bordeaux Contrôlée
-    2021 Red Wine
-    14.2% ALC. BY VOL.
-    750 ML
-    Bottled by Chateau Bordeaux SA, Bordeaux, France
-    Product of France
-    GOVERNMENT WARNING: (1) According to the Surgeon General, women should not drink alcoholic beverages during pregnancy because of the risk of birth defects. (2) Consumption of alcoholic beverages impairs your ability to drive a car or operate machinery, and may cause health problems.
-  `
-};
 
 export default function App() {
   // UI Configuration
@@ -370,6 +339,7 @@ export default function App() {
           batchIndex: index + 1,
           batchSize: files.length,
           shouldUpdateMainResult: false,
+          sourceLabel: file.name,
         });
         setBatchProcessed(index + 1);
 
@@ -415,6 +385,7 @@ export default function App() {
         isBatch: false,
         batchBrandName: formatUploadLabelName(file.name, formBrandName || 'Uploaded label'),
         shouldUpdateMainResult: true,
+        sourceLabel: file.name,
       });
     } catch (error) {
       console.error('Single upload processing failed:', error);
@@ -501,14 +472,6 @@ export default function App() {
     });
   };
 
-  const getPresetOcrText = (imageSrc: string | null) => {
-    if (!imageSrc) return null;
-    if (imageSrc.includes('old_tom')) return PRESET_OCR_TEXTS['old_tom_bourbon_label.jpg'];
-    if (imageSrc.includes('stones_throw')) return PRESET_OCR_TEXTS['stones_throw_beer_label.jpg'];
-    if (imageSrc.includes('chateau_bordeaux')) return PRESET_OCR_TEXTS['chateau_bordeaux_label.jpg'];
-    return null;
-  };
-
   // Trigger TTB compliance scan with specific image source
   const runComplianceCheckWithImage = async (
     imageSrc: string | null,
@@ -519,6 +482,7 @@ export default function App() {
       batchSize?: number;
       shouldUpdateMainResult?: boolean;
       entryId?: number;
+      sourceLabel?: string | null;
     }
   ) => {
     if (!imageSrc) return null;
@@ -534,7 +498,7 @@ export default function App() {
     }
     const startTime = Date.now();
     let report: VerificationResult | null = null;
-    const presetText = getPresetOcrText(imageSrc);
+    const presetText = getPresetOcrText(imageSrc, options?.sourceLabel);
     // Construct a mock ColaApplication object from form inputs to match with verification utility
     const appConfig: ColaApplication = {
       id: 'custom-app',
